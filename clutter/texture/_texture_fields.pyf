@@ -1,0 +1,23 @@
+!    -*- f90 -*-
+! Note: the context of this file is case sensitive.
+
+python module texture_fields ! in 
+    interface  ! in :texture_fields
+        subroutine compute_texture(input,sweep_start,sweep_end,ray_window,gate_window,fill_value,ns,nr,ng,sample,texture) ! in :texture_fields:src/texture_fields.f90
+            real(kind=8) dimension(nr,ng),intent(in) :: input
+            integer(kind=4) dimension(ns),intent(in) :: sweep_start
+            integer(kind=4) dimension(ns),intent(in),depend(ns) :: sweep_end
+            integer(kind=4) intent(in) :: ray_window
+            integer(kind=4) intent(in) :: gate_window
+            real(kind=8) intent(in) :: fill_value
+            integer(kind=4) optional,intent(in),check(len(sweep_start)>=ns),depend(sweep_start) :: ns=len(sweep_start)
+            integer(kind=4) optional,intent(in),check(shape(input,0)==nr),depend(input) :: nr=shape(input,0)
+            integer(kind=4) optional,intent(in),check(shape(input,1)==ng),depend(input) :: ng=shape(input,1)
+            integer(kind=4) dimension(nr,ng),intent(out),depend(nr,ng) :: sample
+            real(kind=8) dimension(nr,ng),intent(out),depend(nr,ng) :: texture
+        end subroutine compute_texture
+    end interface 
+end python module texture_fields
+
+! This file was auto-generated with f2py (version:2).
+! See http://cens.ioc.ee/projects/f2py2e/
