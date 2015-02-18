@@ -1,9 +1,8 @@
 ! Module: texture.f90
 
 
-subroutine compute_texture(input, sweep_start, sweep_end, ray_window, &
-	                       gate_window, fill_value, ns, nr, ng, sample, &
-	                       texture)
+subroutine compute(input, sweep_start, sweep_end, ray_window, gate_window, &
+	               fill_value, ns, nr, ng, sample, texture)
 
 	implicit none
 
@@ -16,7 +15,6 @@ subroutine compute_texture(input, sweep_start, sweep_end, ray_window, &
 	real(kind=8), intent(out), dimension(nr,ng)    :: texture
 
 !	Define local variables ===================================================
-
 	logical, dimension(nr, ng) :: mask
 	real(kind=8)               :: N_tmp, mean_tmp, var_tmp
 	integer(kind=4)            :: r, g, s, r0, rn, g0, gn, s0, sn
@@ -26,11 +24,9 @@ subroutine compute_texture(input, sweep_start, sweep_end, ray_window, &
 
 !	F2PY directives ==========================================================
 
-	!f2py integer(kind=4), optional, intent(in) :: ns, nr, ng
-
 
 !	==========================================================================
-	
+
 !	Fill texture array
 	texture = fill_value
 
@@ -44,33 +40,34 @@ subroutine compute_texture(input, sweep_start, sweep_end, ray_window, &
 	    gn = min(ng, g + gate_window / 2)
 
 	  	do s = 1, ns
-	  		
-!		Parse sweep start and end indices
-	  	s0 = sweep_start(s)
-	  	sn = sweep_end(s)
 
-	  	do r = s0, sn
+!			Parse sweep start and end indices
+	  		s0 = sweep_start(s)
+	  		sn = sweep_end(s)
 
-!		Parse stencil of rays within window
-		r0 = max(1, r - ray_window / 2)
-		rn = min(sn, r + ray_window / 2)
+	  		do r = s0, sn
 
-!		Compute sample size within the window
-		N_tmp = count(mask(r0:rn,g0:gn))
-		sample(r,g) = N_tmp
+!			Parse stencil of rays within window
+			r0 = max(1, r - ray_window / 2)
+			rn = min(sn, r + ray_window / 2)
 
-!		Do not compute the texture field (standard deviation) if there are
-!		no good gates
-		if (N_tmp > 0) then
-		mean_tmp = sum(input(r0:rn,g0:gn), mask(r0:rn,g0:gn)) / N_tmp
-		var_tmp = sum(input(r0:rn,g0:gn)**2, mask(r0:rn,g0:gn)) / N_tmp - mean_tmp**2
-		texture(r,g) = sqrt(var_tmp)
-		endif
+!			Compute sample size within the window
+			N_tmp = count(mask(r0:rn,g0:gn))
+			sample(r,g) = N_tmp
 
+!			Do not compute the texture field (standard deviation) if there are
+!			no good gates
+			if (N_tmp > 0) then
+				mean_tmp = sum(input(r0:rn,g0:gn), mask(r0:rn,g0:gn)) / N_tmp
+				var_tmp = sum(input(r0:rn,g0:gn)**2, mask(r0:rn,g0:gn)) / N_tmp - &
+							 mean_tmp**2
+				texture(r,g) = sqrt(var_tmp)
+			endif
+
+			enddo
 		enddo
-	  	enddo
 	enddo
 
 	return
 
-end subroutine compute_texture
+end subroutine compute
