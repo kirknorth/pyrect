@@ -2,7 +2,7 @@
 
 
 subroutine compute(input, sweep_start, sweep_end, ray_window, gate_window, &
-	               fill_value, ns, nr, ng, sample, texture)
+						 fill_value, ns, nr, ng, sample, texture)
 
 	implicit none
 
@@ -15,6 +15,7 @@ subroutine compute(input, sweep_start, sweep_end, ray_window, gate_window, &
 	real(kind=8), intent(out), dimension(nr,ng)    :: texture
 
 !	Define local variables ===================================================
+
 	logical, dimension(nr, ng) :: mask
 	real(kind=8)               :: N_tmp, mean_tmp, var_tmp
 	integer(kind=4)            :: r, g, s, r0, rn, g0, gn, s0, sn
@@ -36,16 +37,16 @@ subroutine compute(input, sweep_start, sweep_end, ray_window, gate_window, &
 	do g = 1, ng
 
 !		Parse stencil of gates within window
-	    g0 = max(1, g - gate_window / 2)
-	    gn = min(ng, g + gate_window / 2)
+		g0 = max(1, g - gate_window / 2)
+		gn = min(ng, g + gate_window / 2)
 
-	  	do s = 1, ns
+		do s = 1, ns
 
 !			Parse sweep start and end indices
-	  		s0 = sweep_start(s)
-	  		sn = sweep_end(s)
+			s0 = sweep_start(s)
+			sn = sweep_end(s)
 
-	  		do r = s0, sn
+			do r = s0, sn
 
 !			Parse stencil of rays within window
 			r0 = max(1, r - ray_window / 2)
@@ -60,7 +61,7 @@ subroutine compute(input, sweep_start, sweep_end, ray_window, gate_window, &
 			if (N_tmp > 0) then
 				mean_tmp = sum(input(r0:rn,g0:gn), mask(r0:rn,g0:gn)) / N_tmp
 				var_tmp = sum(input(r0:rn,g0:gn)**2, mask(r0:rn,g0:gn)) / N_tmp - &
-							 mean_tmp**2
+						    mean_tmp**2
 				texture(r,g) = sqrt(var_tmp)
 			endif
 
