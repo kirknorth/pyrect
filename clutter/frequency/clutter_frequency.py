@@ -6,12 +6,26 @@ clutter.frequency.clutter_frequency
 
 import os
 import re
+import json
+import pickle
 import numpy as np
 
 from datetime import datetime
 
-from pyart.io import read_sigmet, write_cfradial
+from pyart.io import read
 from pyart.config import get_field_name
+from pyart.util import datetime_utils
+
+
+def _pickle_map(clutter_map, outdir, filename):
+    """
+    Pickle a clutter frequency (probability) map.
+    """
+
+    with open(os.path.join(outdir, filename), 'wb') as fid:
+        pickle.dump(clutter_map, fid, protocol=pickle.HIGHEST_PROTOCOL)
+
+    return
 
 
 def map_date_range(start, stop, inpdir, stamp, date_str='[0-9]{12}',
@@ -63,8 +77,7 @@ def map_date_range(start, stop, inpdir, stamp, date_str='[0-9]{12}',
             print 'Processing file %s' % os.path.basename(f)
 
         # Read radar data
-        radar = read_sigmet(
-            f, time_ordered='none', exclude_fields=exclude_fields)
+        radar = read(f, exclude_fields=exclude_fields)
 
         # Make sure radar has proper number of sweeps
         # This is a way to check that VCPs are consistent
@@ -78,19 +91,24 @@ def map_date_range(start, stop, inpdir, stamp, date_str='[0-9]{12}',
 
     # Compute the probability a pixel (gate) is clutter
     sample_size = len(clutter)
-    clutter_prob = np.sum(clutter, axis=0) / sample_size
+    clutter_map = np.sum(clutter, axis=0) / sample_size
+
+    # Parse first and last radars
+    first_radar = read(files[0], exclude_fields=exclude_fields)
+    last_radar = read(files[-1], exclude_fields=exclude_fields)
 
     return {
-        'clutter frequency map': clutter_prob,
-        'start time': start,
-        'end time': stop,
-        'last radar': radar
-        'sample size': sample_size
+        'clutter frequency map': clutter_map,
+        'start time': datetime_utils.datetime_from_radar(first_radar),
+        'end time': datetime_utils.datetime_from_radar(last_radar),
+        'first radar': first_radar,
+        'last radar': last_radar,
+        'sample size': sample_size,
+        'radar files': [os.path.basename(f) for f in files],
     }
 
 
-def map_json_list(filename, inpdir=None, date_str='[0-9]{12}',
-                  date_fmt='%y%m%d%H%M%S', min_ncp=0.3, num_sweeps=22,
+def map_json_list(filename, inpdir=None, min_ncp=0.3, num_sweeps=22,
                   exclude_fields=None, refl_field=None, ncp_field=None,
                   ebug=False, verbose=False):
     """
@@ -108,12 +126,57 @@ def map_json_list(filename, inpdir=None, date_str='[0-9]{12}',
     -------
     """
 
+    # Parse field names
+    if refl_field is None:
+        refl_field = get_field_name('reflectivity')
+    if ncp_field is None:
+        ncp_field = get_field_name('normalized_coherent_power')
 
+    # Parse files from JSON file
+    with open(filename, 'r') as fid:
+        files = json.load(fid)
 
+    # Append input directory if given
+    if inpdir is not None:
+        files = [os.path.join(inpdir, f) for f in files]
 
+    if verbose:
+        print 'Total number of radar files to process = %i' % len(files)
 
+    # Loop over all files
+    clutter = []
+    for f in files:
 
+        if verbose:
+            print 'Processing file %s' % os.path.basename(f)
 
+        # Read radar data
+        radar = read(f, exclude_fields=exclude_fields)
 
+        # Make sure radar has proper number of sweeps
+        # This is a way to check that VCPs are consistent
+        if radar.nsweeps < num_sweeps:
+            continue
 
-    return
+        # Find pixels that have a coherent signal
+        ncp = radar.fields[ncp_field]['data']
+        ncp = np.ma.masked_where(ncp < min_ncp, ncp, copy=False)
+        clutter.append(np.logical_not(ncp.mask).astype(np.float64))
+
+    # Compute the probability a pixel (gate) is clutter
+    sample_size = len(clutter)
+    clutter_prob = np.sum(clutter, axis=0) / sample_size
+
+    # Parse first and last radars
+    first_radar = read(files[0], exclude_fields=exclude_fields)
+    last_radar = read(files[-1], exclude_fields=exclude_fields)
+
+    return {
+        'clutter frequency map': clutter_map,
+        'start time': datetime_utils.datetime_from_radar(first_radar),
+        'end time': datetime_utils.datetime_from_radar(last_radar),
+        'first radar': first_radar,
+        'last radar': last_radar,
+        'sample size': sample_size,
+        'radar files': [os.path.basename(f) for f in files],
+    }

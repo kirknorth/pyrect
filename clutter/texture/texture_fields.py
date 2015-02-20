@@ -1,4 +1,7 @@
 """
+clutter.texture.texture_fields
+==============================
+
 """
 
 import numpy as np
@@ -53,8 +56,9 @@ def compute_field(radar, field, ray_window=3, gate_window=3, min_sample=None,
         'long_name': '{} texture'.format(radar.fields[field]['long_name']),
         '_FillValue': texture.fill_value,
         'units': radar.fields[field]['units'],
-        'comment': ('Texture field is defined as the standard deviation '
+        'comment_1': ('Texture field is defined as the standard deviation '
                     'of a field within a prescribed window')
+        'comment_2': 'Window size was {} x {}'.format(gate_window, ray_window)
     }
 
     radar.add_field('{}_texture'.format(field), texture, replace_existing=True)
