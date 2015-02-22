@@ -14,7 +14,6 @@ from datetime import datetime
 
 from pyart.io import read
 from pyart.config import get_field_name
-from pyart.util import datetime_utils
 
 
 def _pickle_map(clutter_map, outdir, filename):
@@ -93,16 +92,21 @@ def map_date_range(start, stop, inpdir, stamp, date_str='[0-9]{12}',
     sample_size = len(clutter)
     clutter_map = np.sum(clutter, axis=0) / sample_size
 
-    # Parse first and last radars
-    first_radar = read(files[0], exclude_fields=exclude_fields)
-    last_radar = read(files[-1], exclude_fields=exclude_fields)
+    # Add clutter frequency map to radar object
+    clutter = {
+        'data': clutter_map.astype(np.float64),
+        'long_name': 'Clutter frequency map',
+        'standard_name': 'clutter_frequency_map',
+        'valid_min': 0.0,
+        'valid_max': 1.0,
+        '_FillValue': None,
+        'units': None,
+    }
+    radar.add_field('clutter_frequency_map', clutter, replace_existing=False)
 
     return {
-        'clutter frequency map': clutter_map,
-        'start time': datetime_utils.datetime_from_radar(first_radar),
-        'end time': datetime_utils.datetime_from_radar(last_radar),
-        'first radar': first_radar,
-        'last radar': last_radar,
+        'clutter frequency map': clutter_map.astype(np.float64),
+        'last radar': radar,
         'sample size': sample_size,
         'radar files': [os.path.basename(f) for f in files],
     }
@@ -110,7 +114,7 @@ def map_date_range(start, stop, inpdir, stamp, date_str='[0-9]{12}',
 
 def map_json_list(filename, inpdir=None, min_ncp=0.3, num_sweeps=22,
                   exclude_fields=None, refl_field=None, ncp_field=None,
-                  ebug=False, verbose=False):
+                  debug=False, verbose=False):
     """
     Compute the clutter frequency (probability) map from the files listed in a
     JSON file. The listed files should define a non-precipitating time period
@@ -165,18 +169,23 @@ def map_json_list(filename, inpdir=None, min_ncp=0.3, num_sweeps=22,
 
     # Compute the probability a pixel (gate) is clutter
     sample_size = len(clutter)
-    clutter_prob = np.sum(clutter, axis=0) / sample_size
+    clutter_map = np.sum(clutter, axis=0) / sample_size
 
-    # Parse first and last radars
-    first_radar = read(files[0], exclude_fields=exclude_fields)
-    last_radar = read(files[-1], exclude_fields=exclude_fields)
+    # Add clutter frequency map to radar object
+    clutter = {
+        'data': clutter_map.astype(np.float64),
+        'long_name': 'Clutter frequency map',
+        'standard_name': 'clutter_frequency_map',
+        'valid_min': 0.0,
+        'valid_max': 1.0,
+        '_FillValue': None,
+        'units': None,
+    }
+    radar.add_field('clutter_frequency_map', clutter, replace_existing=False)
 
     return {
-        'clutter frequency map': clutter_map,
-        'start time': datetime_utils.datetime_from_radar(first_radar),
-        'end time': datetime_utils.datetime_from_radar(last_radar),
-        'first radar': first_radar,
-        'last radar': last_radar,
+        'clutter frequency map': clutter_map.astype(np.float64),
+        'last radar': radar,
         'sample size': sample_size,
         'radar files': [os.path.basename(f) for f in files],
     }
