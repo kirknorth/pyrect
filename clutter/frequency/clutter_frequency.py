@@ -28,7 +28,7 @@ def _pickle_map(clutter_map, outdir, filename):
 
 
 def map_date_range(start, stop, inpdir, stamp, date_str='[0-9]{12}',
-                   date_fmt='%y%m%d%H%M%S', min_ncp=0.3, num_sweeps=22,
+                   date_fmt='%y%m%d%H%M%S', min_ncp=0.3, vcp_sweeps=22,
                    exclude_fields=None, refl_field=None, ncp_field=None,
                    debug=False, verbose=False):
     """
@@ -80,7 +80,7 @@ def map_date_range(start, stop, inpdir, stamp, date_str='[0-9]{12}',
 
         # Make sure radar has proper number of sweeps
         # This is a way to check that VCPs are consistent
-        if radar.nsweeps < num_sweeps:
+        if radar.nsweeps != vcp_sweeps:
             continue
 
         # Find pixels that have a coherent signal
@@ -112,7 +112,7 @@ def map_date_range(start, stop, inpdir, stamp, date_str='[0-9]{12}',
     }
 
 
-def map_json_list(filename, inpdir=None, min_ncp=0.3, num_sweeps=22,
+def map_json_list(filename, inpdir=None, min_ncp=0.3, vcp_sweeps=22,
                   exclude_fields=None, refl_field=None, ncp_field=None,
                   debug=False, verbose=False):
     """
@@ -159,7 +159,7 @@ def map_json_list(filename, inpdir=None, min_ncp=0.3, num_sweeps=22,
 
         # Make sure radar has proper number of sweeps
         # This is a way to check that VCPs are consistent
-        if radar.nsweeps < num_sweeps:
+        if radar.nsweeps != vcp_sweeps:
             continue
 
         # Find pixels that have a coherent signal
