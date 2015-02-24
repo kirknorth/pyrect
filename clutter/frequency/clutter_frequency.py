@@ -16,10 +16,14 @@ from pyart.io import read
 from pyart.config import get_field_name
 
 
-def _pickle_map(clutter_map, outdir, filename):
+def _pickle_map(clutter_map, filename, outdir=None):
     """
     Pickle a clutter frequency (probability) map.
     """
+
+    # Parse output directory
+    if outdir is not None:
+        filename = os.path.join(outdir, filename)
 
     with open(os.path.join(outdir, filename), 'wb') as fid:
         pickle.dump(clutter_map, fid, protocol=pickle.HIGHEST_PROTOCOL)
@@ -109,10 +113,12 @@ def map_date_range(start, stop, inpdir, stamp, date_str='[0-9]{12}',
         'last radar': radar,
         'sample size': sample_size,
         'radar files': [os.path.basename(f) for f in files],
+        'min normalized coherent power': min_ncp,
+        'sweeps in VCP': vcp_sweeps,
     }
 
 
-def map_json_list(filename, inpdir=None, min_ncp=0.3, vcp_sweeps=22,
+def map_json_list(filename, inpdir=None, min_ncp=0.5, vcp_sweeps=22,
                   exclude_fields=None, refl_field=None, ncp_field=None,
                   debug=False, verbose=False):
     """
@@ -188,4 +194,6 @@ def map_json_list(filename, inpdir=None, min_ncp=0.3, vcp_sweeps=22,
         'last radar': radar,
         'sample size': sample_size,
         'radar files': [os.path.basename(f) for f in files],
+        'min normalized coherent power': min_ncp,
+        'sweeps in VCP': vcp_sweeps,
     }

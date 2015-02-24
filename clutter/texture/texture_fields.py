@@ -6,6 +6,7 @@ clutter.texture.texture_fields
 
 import os
 import json
+import pickle
 import numpy as np
 
 from collections import defaultdict
@@ -16,7 +17,7 @@ from pyart.io import read
 from . import compute_texture
 
 
-def _pickle_texture_histograms(histograms, filename, outdir=None):
+def _pickle_histograms(histograms, filename, outdir=None):
     """
     """
 
@@ -36,7 +37,8 @@ def _pickle_texture_histograms(histograms, filename, outdir=None):
 
 
 def _compute_field(radar, field, ray_window=3, gate_window=3, min_sample=None,
-                   min_ncp=0.3, fill_value=None, ncp_field=None):
+                   min_ncp=0.5, min_sweep=None, max_sweep=None,
+                   fill_value=None, ncp_field=None):
     """
     Compute the texture (standard deviation) within the 2-D window for the
     specified field.
@@ -62,6 +64,15 @@ def _compute_field(radar, field, ray_window=3, gate_window=3, min_sample=None,
     # Parse fields
     ncp = radar.fields[ncp_field]['data']
     data = radar.fields[field]['data']
+
+    # Mask sweeps outside of specified range
+    if min_sweep is not None:
+        i = radar.sweep_start_ray_index['data'][min_sweep]
+        data[0:i,:] = np.ma.masked
+
+    if max_sweep is not None:
+        i = radar.sweep_end_ray_index['data'][max_sweep]
+        data[i+1:-1,:] = np.ma.masked
 
     # Mask incoherent echoes
     data = np.ma.masked_where(ncp < min_ncp, data, copy=False)
@@ -105,7 +116,7 @@ def _compute_field(radar, field, ray_window=3, gate_window=3, min_sample=None,
 
 
 def add_textures(radar, fields, ray_window=3, gate_window=3, min_sample=None,
-                 min_ncp=0.3, min_sweep=None, max_sweep=None, fill_value=None,
+                 min_ncp=0.5, min_sweep=None, max_sweep=None, fill_value=None,
                  ncp_field=None):
     """
     """
@@ -118,26 +129,18 @@ def add_textures(radar, fields, ray_window=3, gate_window=3, min_sample=None,
     if ncp_field is None:
         ncp_field = get_field_name('normalized_coherent_power')
 
-    if min_sweep is not None:
-        i = radar.sweep_start_ray_index['data'][min_sweep]
-        radar.fields[field]['data'][0:i,:] = np.ma.masked
-
-    if max_sweep is not None:
-        i = radar.sweep_end_ray_index['data'][max_sweep]
-        radar.fields[field]['data'][i+1:-1,:] = np.ma.masked
-
     for field in fields:
         _compute_field(
             radar, field, ray_window=ray_window, gate_window=gate_window,
-            min_sample=min_sample, min_ncp=min_ncp, fill_value=fill_value,
-            ncp_field=ncp_field)
+            min_sample=min_sample, min_ncp=min_ncp, min_sweep=min_sweep,
+            max_sweep=max_sweep, fill_value=fill_value, ncp_field=ncp_field)
 
     return
 
 
 def histogram_from_json(
         filename, field, inpdir=None, ray_window=3, gate_window=3,
-        min_sample=None, bins=10, limits=None, min_ncp=0.3, vcp_sweeps=22,
+        min_sample=None, bins=10, limits=None, min_ncp=0.5, vcp_sweeps=22,
         min_sweep=None, max_sweep=None, exclude_fields=None, fill_value=None,
         ncp_field=None, verbose=False):
     """
@@ -175,19 +178,11 @@ def histogram_from_json(
         if verbose:
             print 'Processing file %s' % os.path.basename(f)
 
-        if min_sweep is not None:
-            i = radar.sweep_start_ray_index['data'][min_sweep]
-            radar.fields[field]['data'][0:i,:] = np.ma.masked
-
-        if max_sweep is not None:
-            i = radar.sweep_end_ray_index['data'][max_sweep]
-            radar.fields[field]['data'][i+1:-1,:] = np.ma.masked
-
         # Compute texture fields
         _compute_field(
             radar, field, ray_window=ray_window, gate_window=gate_window,
-            min_sample=min_sample, min_ncp=min_ncp, fill_value=fill_value,
-            ncp_field=ncp_field)
+            min_sample=min_sample, min_ncp=min_ncp, min_sweep=min_sweep,
+            max_sweep=max_sweep, fill_value=fill_value, ncp_field=ncp_field)
 
         # Parse data and compute histogram
         data = radar.fields['{}_texture'.format(field)]['data']
@@ -207,4 +202,8 @@ def histogram_from_json(
         'radar files': [os.path.basename(f) for f in files],
         'min sweep': min_sweep,
         'max sweep': max_sweep,
+        'min normalized coherent power': min_ncp,
+        'sweeps in VCP': vcp_sweeps,
+        'ray window size': ray_window,
+        'gate window size': gate_window,
         }
