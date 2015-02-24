@@ -15,7 +15,7 @@ from matplotlib.ticker import MultipleLocator
 ########################
 
 # Define the proper number of sweeps --> VCP to plot
-NUM_SWEEPS = 22
+VCP_SWEEPS = 22
 
 # Define sweeps to be plotted
 SWEEPS = [0, 1, 2, 3, 4, 5, 6, 8, 10, 12, 14, 16, 18, 20, 21]
@@ -61,7 +61,7 @@ def _pcolormesh(radar, field, sweep=0, cmap=None, norm=None, ax=None):
     title = '{} {:.1f} deg\n {}'.format(
        radar.metadata['instrument_name'], radar.fixed_angle['data'][sweep],
        radar.fields[field]['long_name'])
-    ax.set_title(title)
+    ax.set_title(title, fontsize=18)
 
     return qm
 
@@ -81,7 +81,7 @@ def multipanel(filename, outdir, inpdir=None, dpi=50, verbose=False):
     # Parse radar data
     radar = data['last radar']
 
-    if radar.nsweeps < NUM_SWEEPS:
+    if radar.nsweeps != VCP_SWEEPS:
         return
 
     if verbose:
@@ -104,8 +104,8 @@ def multipanel(filename, outdir, inpdir=None, dpi=50, verbose=False):
         ax.xaxis.set_minor_locator(MultipleLocator(5))
         ax.yaxis.set_major_locator(MultipleLocator(10))
         ax.yaxis.set_minor_locator(MultipleLocator(5))
-        ax.set_xlabel('Eastward Range from Radar (km)')
-        ax.set_ylabel('Northward Range from Radar (km)')
+        ax.set_xlabel('Eastward Range from Radar (km)', fontsize=18)
+        ax.set_ylabel('Northward Range from Radar (km)', fontsize=18)
         ax.grid(which='major')
 
     # Color bars
