@@ -119,8 +119,8 @@ def map_date_range(start, stop, inpdir, stamp, date_str='[0-9]{12}',
 
 
 def map_json_list(filename, inpdir=None, min_ncp=0.5, vcp_sweeps=22,
-                  exclude_fields=None, refl_field=None, ncp_field=None,
-                  debug=False, verbose=False):
+                  exclude_fields=None, ncp_field=None, debug=False,
+                  verbose=False):
     """
     Compute the clutter frequency (probability) map from the files listed in a
     JSON file. The listed files should define a non-precipitating time period
