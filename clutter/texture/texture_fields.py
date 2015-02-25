@@ -141,8 +141,8 @@ def add_textures(radar, fields, ray_window=3, gate_window=3, min_sample=None,
 def histogram_from_json(
         filename, field, inpdir=None, ray_window=3, gate_window=3,
         min_sample=None, bins=10, limits=None, min_ncp=0.5, vcp_sweeps=22,
-        min_sweep=None, max_sweep=None, exclude_fields=None, fill_value=None,
-        ncp_field=None, verbose=False):
+        vcp_rays=7920, min_sweep=None, max_sweep=None, exclude_fields=None,
+        fill_value=None, ncp_field=None, verbose=False):
     """
     """
 
@@ -172,7 +172,7 @@ def histogram_from_json(
         # Read radar data
         radar = read(f, exclude_fields=exclude_fields)
 
-        if radar.nsweeps != vcp_sweeps:
+        if radar.nsweeps != vcp_sweeps or radar.nrays != vcp_rays:
             continue
 
         if verbose:
