@@ -20,6 +20,8 @@ RAY_WINDOW = 5
 GATE_WINDOW = 5
 VCP_SWEEPS = 22
 VCP_RAYS = 7920
+MIN_SWEEP = 2
+MAX_SWEEP = None
 
 # Define bins and limits for texture histograms
 BINS_PHIDP, LIMITS_PHIDP = 360, (0, 360)
@@ -35,6 +37,7 @@ EXCLUDE_FIELDS = [
     ]
 
 # Parse field names
+ncp_field = get_field_name('normalized_coherent_power')
 refl_field = get_field_name('reflectivity')
 phidp_field = get_field_name('differential_phase')
 zdr_field = get_field_name('differential_reflectivity')
@@ -63,13 +66,23 @@ if __name__ == '__main__':
         print 'inpdir = %s' % args.inpdir
         print 'outdir = %s' % args.outdir
 
+    if args.verbose:
+        print 'MIN_NCP = %.2f' % MIN_NCP
+        print 'MIN_SAMPLE = %i' % MIN_SAMPLE
+        print 'RAY_WINDOW = %i' % RAY_WINDOW
+        print 'GATE_WINDOW = %i' % GATE_WINDOW
+        print 'VCP_SWEEPS = %i' % VCP_SWEEPS
+        print 'VCP_RAYS = %i' % VCP_RAYS
+        print 'MIN_SWEEP = %s' % MIN_SWEEP
+        print 'MAX_SWEEP = %s' % MAX_SWEEP
+
     # Compute histograms for specified fields
     phidp = texture_fields.histogram_from_json(
         args.json, phidp_field, inpdir=args.inpdir, ray_window=RAY_WINDOW,
         gate_window=GATE_WINDOW, min_sample=MIN_SAMPLE, bins=BINS_PHIDP,
         limits=LIMITS_PHIDP, min_ncp=MIN_NCP, vcp_sweeps=VCP_SWEEPS,
         vcp_rays=VCP_RAYS, min_sweep=MIN_SWEEP, max_sweep=MAX_SWEEP,
-        exclude_fields=EXCLUDE_FIELDS, fill_value=None, ncp_field=None,
+        exclude_fields=EXCLUDE_FIELDS, fill_value=None, ncp_field=ncp_field,
         verbose=args.verbose)
 
     zdr = texture_fields.histogram_from_json(
@@ -77,7 +90,7 @@ if __name__ == '__main__':
         gate_window=GATE_WINDOW, min_sample=MIN_SAMPLE, bins=BINS_ZDR,
         limits=LIMITS_ZDR, min_ncp=MIN_NCP, vcp_sweeps=VCP_SWEEPS,
         vcp_rays=VCP_RAYS, min_sweep=MIN_SWEEP, max_sweep=MAX_SWEEP,
-        exclude_fields=EXCLUDE_FIELDS, fill_value=None, ncp_field=None,
+        exclude_fields=EXCLUDE_FIELDS, fill_value=None, ncp_field=ncp_field,
         verbose=args.verbose)
 
     rhohv = texture_fields.histogram_from_json(
@@ -85,7 +98,7 @@ if __name__ == '__main__':
         gate_window=GATE_WINDOW, min_sample=MIN_SAMPLE, bins=BINS_RHOHV,
         limits=LIMITS_RHOHV, min_ncp=MIN_NCP, vcp_sweeps=VCP_SWEEPS,
         vcp_rays=VCP_RAYS, min_sweep=MIN_SWEEP, max_sweep=MAX_SWEEP,
-        exclude_fields=EXCLUDE_FIELDS, fill_value=None, ncp_field=None,
+        exclude_fields=EXCLUDE_FIELDS, fill_value=None, ncp_field=ncp_field,
         verbose=args.verbose)
 
     refl = texture_fields.histogram_from_json(
@@ -93,7 +106,7 @@ if __name__ == '__main__':
         gate_window=GATE_WINDOW, min_sample=MIN_SAMPLE, bins=BINS_REFL,
         limits=LIMITS_REFL, min_ncp=MIN_NCP, vcp_sweeps=VCP_SWEEPS,
         vcp_rays=VCP_RAYS, min_sweep=MIN_SWEEP, max_sweep=MAX_SWEEP,
-        exclude_fields=EXCLUDE_FIELDS, fill_value=None, ncp_field=None,
+        exclude_fields=EXCLUDE_FIELDS, fill_value=None, ncp_field=ncp_field,
         verbose=args.verbose)
 
     # Pack histograms together
@@ -101,4 +114,4 @@ if __name__ == '__main__':
 
     # Pickle texture histograms
     texture_fields._pickle_histograms(
-        histograms, args.pickle, output=args.output)
+        histograms, args.pickle, outdir=args.outdir)

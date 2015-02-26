@@ -204,6 +204,7 @@ def histogram_from_json(
         'max sweep': max_sweep,
         'min normalized coherent power': min_ncp,
         'sweeps in VCP': vcp_sweeps,
+        'rays in VCP': vcp_rays,
         'ray window size': ray_window,
         'gate window size': gate_window,
         }

@@ -23,7 +23,7 @@ rcParams['ytick.minor.size'] = 2
 rcParams['ytick.minor.width'] = 1
 
 
-def histograms(pkl, outdir=None, dpi=100, verbose=False):
+def histograms(precip, nonprecip, image, outdir=None, dpi=100, verbose=False):
     """
     """
 
@@ -32,37 +32,49 @@ def histograms(pkl, outdir=None, dpi=100, verbose=False):
         outdir = ''
 
     # Read pickled data
-    with open(pkl, 'rb') as fid:
-        data = pickle.load(fid)
+    with open(precip, 'rb') as fid:
+        precip_data = pickle.load(fid)
+    with open(nonprecip, 'rb') as fid:
+        nonprecip_data = pickle.load(fid)
 
     if verbose:
-        print [field for field in data.keys()]
+        print 'Precipitation data: %s' % precip_data.keys()
+        print 'Non-precipitation data: %s' % nonprecip_data.keys()
 
     # Parse field textures
-    phidp = data['Differential phase (PhiDP)']
-    zdr = data['Differential reflectivity']
-    rhohv = data['Cross correlation ratio (RHOHV)']
-    refl = data['Reflectivity']
+    phidp_p = precip_data['Differential phase (PhiDP)']
+    phidp_np = nonprecip_data['Differential phase (PhiDP)']
+    zdr_p = precip_data['Differential reflectivity']
+    zdr_np = nonprecip_data['Differential reflectivity']
+    rhohv_p = precip_data['Cross correlation ratio (RHOHV)']
+    rhohv_np = nonprecip_data['Cross correlation ratio (RHOHV)']
+    refl_p = precip_data['Reflectivity']
+    refl_np = nonprecip_data['Reflectivity']
 
     fig = plt.figure(figsize=(18, 4))
 
     # (a) Differential phase texture
     axa = fig.add_subplot(141, xlim=(0, 180), ylim=(0, 1))
-    axa.plot(phidp['bin centers'], phidp['normalized histogram'], 'k-',
+    axa.plot(phidp_p['bin centers'], phidp_p['normalized histogram'], 'k-',
+             linewidth=2, label='Precip')
+    axa.plot(phidp_np['bin centers'], phidp_np['normalized histogram'], 'r-',
              linewidth=2, label='Non-precip')
     axa.xaxis.set_major_locator(MultipleLocator(40))
     axa.xaxis.set_minor_locator(MultipleLocator(10))
     axa.yaxis.set_major_locator(MultipleLocator(0.2))
     axa.yaxis.set_major_locator(MultipleLocator(0.1))
     axa.set_xlabel('(deg)')
+    axa.set_ylabel('Normalized Histogram')
     axa.set_title('Differential phase texture')
     axa.grid(which='major')
 
     # (b) Differential reflectivity texture
-    axb = fig.add_subplot(142, xlim=(0, 15), ylim=(0, 1))
-    axb.plot(zdr['bin centers'], zdr['normalized histogram'], 'k-',
+    axb = fig.add_subplot(142, xlim=(0, 12), ylim=(0, 1))
+    axb.plot(zdr_p['bin centers'], zdr_p['normalized histogram'], 'k-',
+             linewidth=2, label='Precip')
+    axb.plot(zdr_np['bin centers'], zdr_np['normalized histogram'], 'r-',
              linewidth=2, label='Non-precip')
-    axb.xaxis.set_major_locator(MultipleLocator(3))
+    axb.xaxis.set_major_locator(MultipleLocator(2))
     axb.xaxis.set_minor_locator(MultipleLocator(1))
     axb.yaxis.set_major_locator(MultipleLocator(0.2))
     axb.yaxis.set_major_locator(MultipleLocator(0.1))
@@ -71,8 +83,10 @@ def histograms(pkl, outdir=None, dpi=100, verbose=False):
     axb.grid(which='major')
 
     # (c) Copolar correlation texture
-    axc = fig.add_subplot(143, xlim=(0, 0.6), ylim=(0, 1))
-    axc.plot(rhohv['bin centers'], rhohv['normalized histogram'], 'k-',
+    axc = fig.add_subplot(143, xlim=(0, 0.5), ylim=(0, 1))
+    axc.plot(rhohv_p['bin centers'], rhohv_p['normalized histogram'], 'k-',
+             linewidth=2, label='Precip')
+    axc.plot(rhohv_np['bin centers'], rhohv_np['normalized histogram'], 'r-',
              linewidth=2, label='Non-precip')
     axc.xaxis.set_major_locator(MultipleLocator(0.1))
     axc.xaxis.set_minor_locator(MultipleLocator(0.05))
@@ -82,8 +96,10 @@ def histograms(pkl, outdir=None, dpi=100, verbose=False):
     axc.grid(which='major')
 
     # (d) Reflectivity texture
-    axd = fig.add_subplot(144, xlim=(0, 30), ylim=(0, 1))
-    axd.plot(refl['bin centers'], refl['normalized histogram'], 'k-',
+    axd = fig.add_subplot(144, xlim=(0, 25), ylim=(0, 1))
+    axd.plot(refl_p['bin centers'], refl_p['normalized histogram'], 'k-',
+             linewidth=2, label='Precip')
+    axd.plot(refl_np['bin centers'], refl_np['normalized histogram'], 'r-',
              linewidth=2, label='Non-precip')
     axd.xaxis.set_major_locator(MultipleLocator(5))
     axd.xaxis.set_minor_locator(MultipleLocator(1))
@@ -94,12 +110,10 @@ def histograms(pkl, outdir=None, dpi=100, verbose=False):
     axd.grid(which='major')
 
     # Add legend
-    axd.legend(loc=[1.05, 0.4])
+    axd.legend(loc=[1.03, 0.4])
 
     # Save figure
-    fname, fext = os.path.splitext(pkl)
-    fname = '{}.png'.format(os.path.basename(fname))
-    fig.savefig(os.path.join(outdir, fname), format='png', dpi=dpi,
+    fig.savefig(os.path.join(outdir, image), format='png', dpi=dpi,
                 bbox_inches='tight')
     plt.close(fig)
 
@@ -110,7 +124,9 @@ if __name__ == '__main__':
 
     # Parse command line arguments
     parser = argparse.ArgumentParser(description=None)
-    parser.add_argument('pkl', type=str, help=None)
+    parser.add_argument('precip', type=str, help=None)
+    parser.add_argument('nonprecip', type=str, help=None)
+    parser.add_argument('image', type=str, help=None)
     parser.add_argument('--outdir', nargs='?', type=str, const='', default='',
                         help=None)
     parser.add_argument('--dpi', nargs='?', type=int, const=50, default=50,
@@ -122,10 +138,13 @@ if __name__ == '__main__':
     args = parser.parse_args()
 
     if args.debug:
-        print 'pkl = %s' % args.pkl
+        print 'precip = %s' % args.precip
+        print 'nonprecip = %s' % args.nonprecip
+        print 'image = %s' % args.image
         print 'outdir = %s' % args.outdir
         print 'dpi = %i' % args.dpi
 
     # Call desired plotting function
     histograms(
-        args.pkl, outdir=args.outdir, dpi=args.dpi, verbose=args.verbose)
+        args.precip, args.nonprecip, args.image, outdir=args.outdir,
+        dpi=args.dpi, verbose=args.verbose)
