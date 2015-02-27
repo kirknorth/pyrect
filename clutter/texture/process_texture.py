@@ -15,13 +15,13 @@ from clutter.texture import texture_fields
 
 # Define basic values and thresholds
 MIN_NCP = 0.5
-MIN_SAMPLE = 15
+MIN_SAMPLE = 10
 RAY_WINDOW = 5
 GATE_WINDOW = 5
 VCP_SWEEPS = 22
 VCP_RAYS = 7920
-MIN_SWEEP = 2
-MAX_SWEEP = None
+MIN_SWEEP = None
+MAX_SWEEP = 0
 
 # Define bins and limits for texture histograms
 BINS_PHIDP, LIMITS_PHIDP = 360, (0, 360)

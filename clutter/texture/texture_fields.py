@@ -186,19 +186,27 @@ def histogram_from_json(
 
         # Parse data and compute histogram
         data = radar.fields['{}_texture'.format(field)]['data']
-        hist, edges = np.histogram(
+        hist, bin_edges = np.histogram(
             data.compressed(), bins=bins, range=limits, normed=False,
             weights=None, density=False)
         histogram += hist
 
+    # Compute bin centers
+    bin_centers = bin_edges[:-1] + np.diff(bin_edges) / 2.0
+
+    # Compute normalized histogram and probability density
+    histogram_norm = histogram / histogram.max()
+    pdf = histogram_norm / np.sum(histogram_norm * np.diff(bin_edges))
+
     return {
-        'field': radar.fields[field]['long_name'],
+        'field': field,
         'histogram': histogram,
-        'normalized histogram': histogram / histogram.max(),
+        'normalized histogram': histogram_norm,
+        'probability density': pdf,
         'number of bins': bins,
         'limits': limits,
-        'bin edges': edges,
-        'bin centers': edges[:-1] + np.diff(edges) / 2.0,
+        'bin edges': bin_edges,
+        'bin centers': bin_centers,
         'radar files': [os.path.basename(f) for f in files],
         'min sweep': min_sweep,
         'max sweep': max_sweep,

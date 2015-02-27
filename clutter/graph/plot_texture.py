@@ -10,6 +10,8 @@ from matplotlib import rcParams
 from matplotlib.colors import BoundaryNorm
 from matplotlib.ticker import MultipleLocator
 
+from pyart.config import get_field_name
+
 
 ### Set figure parameters ###
 rcParams['axes.linewidth'] = 1.5
@@ -42,14 +44,14 @@ def histograms(precip, nonprecip, image, outdir=None, dpi=100, verbose=False):
         print 'Non-precipitation data: %s' % nonprecip_data.keys()
 
     # Parse field textures
-    phidp_p = precip_data['Differential phase (PhiDP)']
-    phidp_np = nonprecip_data['Differential phase (PhiDP)']
-    zdr_p = precip_data['Differential reflectivity']
-    zdr_np = nonprecip_data['Differential reflectivity']
-    rhohv_p = precip_data['Cross correlation ratio (RHOHV)']
-    rhohv_np = nonprecip_data['Cross correlation ratio (RHOHV)']
-    refl_p = precip_data['Reflectivity']
-    refl_np = nonprecip_data['Reflectivity']
+    phidp_p = precip_data['differential_phase']
+    phidp_np = nonprecip_data['differential_phase']
+    zdr_p = precip_data['differential_reflectivity']
+    zdr_np = nonprecip_data['differential_reflectivity']
+    rhohv_p = precip_data['cross_correlation_ratio']
+    rhohv_np = nonprecip_data['cross_correlation_ratio']
+    refl_p = precip_data['reflectivity']
+    refl_np = nonprecip_data['reflectivity']
 
     fig = plt.figure(figsize=(18, 4))
 

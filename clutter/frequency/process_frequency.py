@@ -11,13 +11,22 @@ from clutter.frequency import clutter_frequency
 ### GLOBAL VARIABLES ###
 ########################
 
+# Define basic values and thresholds
 MIN_NCP = 0.5
 VCP_SWEEPS = 22
 VCP_RAYS = 7920
-EXCLUDE_FIELDS = ['reflectivity', 'velocity', 'cross_correlation_ratio',
-                  'radar_echo_classification', 'corrected_reflectivity',
-                  'spectrum_width', 'differential_phase',
-                  'differential_reflectivity']
+
+# Define fields to exclude from radar object
+EXCLUDE_FIELDS = [
+    'reflectivity',
+    'velocity',
+    'cross_correlation_ratio',
+    'radar_echo_classification',
+    'corrected_reflectivity',
+    'spectrum_width',
+    'differential_phase',
+    'differential_reflectivity'
+    ]
 
 
 if __name__ == '__main__':
@@ -43,10 +52,6 @@ if __name__ == '__main__':
         print 'inpdir = %s' % args.inpdir
         print 'outdir = %s' % args.outdir
 
-    # Read JSON file
-    with open(os.path.join(args.outdir, args.json), 'r') as fid:
-        files = json.load(fid)
-
     # Compute the clutter frequency map
     clutter = clutter_frequency.map_from_json(
         args.json, inpdir=args.inpdir, min_ncp=MIN_NCP, vcp_sweeps=VCP_SWEEPS,
@@ -55,5 +60,3 @@ if __name__ == '__main__':
 
     # Pickle clutter frequency map
     clutter_frequency._pickle_map(clutter, args.pickle, outdir=args.outdir)
-
-
