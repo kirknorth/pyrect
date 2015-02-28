@@ -6,17 +6,18 @@ subroutine mean_fill(input, sweep_start, sweep_end, ray_window, gate_window, &
 
    implicit none
 
-   integer(kind=4), intent(in)                    :: ns, nr, ng
-   integer(kind=4), intent(in), dimension(ns)     :: sweep_start, sweep_end
-   integer(kind=4), intent(in)                    :: ray_window, gate_window
-   integer(kind=4), intent(in)                    :: min_sample
-   real(kind=8), intent(in)                       :: fill_value
-   real(kind=8), intent(inout), dimension(nr,ng)  :: input
+   integer(kind=4), intent(in)                   :: ns, nr, ng
+   integer(kind=4), intent(in), dimension(ns)    :: sweep_start, sweep_end
+   integer(kind=4), intent(in)                   :: ray_window, gate_window
+   integer(kind=4), intent(in)                   :: min_sample
+   real(kind=8), intent(in)                      :: fill_value
+   real(kind=8), intent(inout), dimension(nr,ng) :: input
+
 
 
 !  Define local variables =====================================================
 
-   logical, dimension(nr, ng) :: is_valid
+   logical, dimension(nr,ng) :: is_valid
    integer(kind=4)            :: N_tmp
    integer(kind=4)            :: r, g, s, r0, rn, g0, gn, s0, sn
 

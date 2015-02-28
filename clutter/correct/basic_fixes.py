@@ -33,6 +33,7 @@ def interpolate_missing(radar, fields=None, ray_window=3, gate_window=3,
 
         # Parse radar data
         data = np.ma.filled(radar.fields[field]['data'], fill_value)
+        data = np.asfortranarray(data, dtype=np.float64)
 
         # Call Fortran routine
         if kind == 'mean':
@@ -44,7 +45,7 @@ def interpolate_missing(radar, fields=None, ray_window=3, gate_window=3,
             raise ValueError('Unsupported interpolation method')
 
         # Mask invalid data
-        np.ma.masked_equal(data, fill_value, copy=False)
+        data = np.ma.masked_equal(data, fill_value, copy=False)
 
         # Add interpolated data to radar object
         radar.fields[field]['data'] = data

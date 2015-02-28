@@ -11,9 +11,9 @@ python module fill_holes ! in
             integer(kind=4) intent(in) :: gate_window
             integer(kind=4) intent(in) :: min_sample
             real(kind=8) intent(in) :: fill_value
-            integer(kind=4) optional,intent(in),check(len(sweep_start)>=ns),depend(sweep_start) :: ns=len(sweep_start)
-            integer(kind=4) optional,intent(in),check(shape(input,0)==nr),depend(input) :: nr=shape(input,0)
-            integer(kind=4) optional,intent(in),check(shape(input,1)==ng),depend(input) :: ng=shape(input,1)
+            integer(kind=4), optional,intent(in),check(len(sweep_start)>=ns),depend(sweep_start) :: ns=len(sweep_start)
+            integer(kind=4), optional,intent(in),check(shape(input,0)==nr),depend(input) :: nr=shape(input,0)
+            integer(kind=4), optional,intent(in),check(shape(input,1)==ng),depend(input) :: ng=shape(input,1)
         end subroutine mean_fill
     end interface 
 end python module fill_holes
