@@ -1,0 +1,21 @@
+!    -*- f90 -*-
+! Note: the context of this file is case sensitive.
+
+python module member ! in 
+    interface  ! in :member
+        subroutine conditional_all(input,pdf,bins,zero,fill_value,nr,ng,nb,p_cond) ! in :member:src/member.f90
+            real(kind=8) dimension(nr,ng),intent(in) :: input
+            real(kind=8) dimension(nb),intent(in) :: pdf
+            real(kind=8) dimension(nb),intent(in),depend(nb) :: bins
+            real(kind=8) intent(in) :: zero
+            real(kind=8) intent(in) :: fill_value
+            integer(kind=4), optional,intent(in),check(shape(input,0)==nr),depend(input) :: nr=shape(input,0)
+            integer(kind=4), optional,intent(in),check(shape(input,1)==ng),depend(input) :: ng=shape(input,1)
+            integer(kind=4), optional,intent(in),check(len(pdf)>=nb),depend(pdf) :: nb=len(pdf)
+            real(kind=8) dimension(nr,ng),intent(out),depend(nr,ng) :: p_cond
+        end subroutine conditional_all
+    end interface 
+end python module member
+
+! This file was auto-generated with f2py (version:2).
+! See http://cens.ioc.ee/projects/f2py2e/
