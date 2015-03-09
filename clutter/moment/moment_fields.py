@@ -5,19 +5,37 @@ clutter.moment.moment_fields
 """
 
 import os
+import json
 import pickle
 import numpy as np
+
+from pyart.io import read
+from pyart.config import get_fillvalue, get_field_name
 
 
 def _pickle_histograms(histograms, filename, outdir=None):
     """
     """
 
+    # Parse output directory
+    if outdir is not None:
+        filename = os.path.join(outdir, filename)
+
+    # Create dictionary containing all texture fields organized by field name
+    data = {}
+    for histogram in histograms:
+        data[histogram['field']] = histogram
+
+    with open(filename, 'wb') as fid:
+        pickle.dump(data, fid, protocol=pickle.HIGHEST_PROTOCOL)
+
+    return
+
 
 def histogram_from_json(
         filename, field, inpdir=None, bins=10, limits=None, min_ncp=0.5,
-        vcp_sweeps=22, min_sweep=None, max_sweep=None, exclude_fields=None,
-        fill_value=None, ncp_field=None):
+        vcp_sweeps=22, vcp_rays=7920, min_sweep=None, max_sweep=None,
+        exclude_fields=None, fill_value=None, ncp_field=None, verbose=False):
     """
     """
 
@@ -47,30 +65,54 @@ def histogram_from_json(
         # Read radar data
         radar = read(f, exclude_fields=exclude_fields)
 
-        if radar.nsweeps != vcp_sweeps:
+        if radar.nsweeps != vcp_sweeps or radar.nrays != vcp_rays:
             continue
 
         if verbose:
             print 'Processing file %s' % os.path.basename(f)
 
-        # Parse data and compute histogram
+        # Parse radar data
+        ncp = radar.fields[ncp_field]['data']
         data = radar.fields[field]['data']
-        hist, edges = np.histogram(
+
+        # Mask sweeps outside specified range
+        if min_sweep is not None:
+            i = radar.sweep_start_ray_index['data'][min_sweep]
+            data[0:i,:] = np.ma.masked
+
+        if max_sweep is not None:
+            i = radar.sweep_end_ray_index['data'][max_sweep]
+            data[i+1:-1,:] = np.ma.masked
+
+        # Mask incoherent echoes
+        data = np.ma.masked_where(ncp < min_ncp, data)
+
+        # Bin data and compute frequencies
+        hist, bin_edges = np.histogram(
             data.compressed(), bins=bins, range=limits, normed=False,
             weights=None, density=False)
         histogram += hist
 
+    # Compute bin centers
+    bin_centers = bin_edges[:-1] + np.diff(bin_edges) / 2.0
+
+    # Compute normalized histogram and probability density
+    histogram_norm = histogram / histogram.max()
+    pdf = histogram_norm / np.sum(histogram_norm * np.diff(bin_edges))
+
     return {
-        'field': radar.fields[field]['long_name'],
+        'field': field,
         'histogram': histogram,
-        'normalized histogram': histogram / histogram.max(),
+        'normalized histogram': histogram_norm,
+        'probability density': pdf,
         'number of bins': bins,
         'limits': limits,
-        'bin edges': edges,
-        'bin centers': edges[:-1] + np.diff(edges) / 2.0,
+        'bin edges': bin_edges,
+        'bin centers': bin_centers,
         'radar files': [os.path.basename(f) for f in files],
         'min sweep': min_sweep,
         'max sweep': max_sweep,
         'min normalized coherent power': min_ncp,
         'sweeps in VCP': vcp_sweeps,
+        'rays in VCP': vcp_rays,
         }
