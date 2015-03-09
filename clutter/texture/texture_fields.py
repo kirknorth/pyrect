@@ -11,8 +11,8 @@ import numpy as np
 
 from collections import defaultdict
 
-from pyart.config import get_fillvalue, get_field_name
 from pyart.io import read
+from pyart.config import get_fillvalue, get_field_name
 
 from . import compute_texture
 
@@ -75,8 +75,8 @@ def _compute_field(radar, field, ray_window=3, gate_window=3, min_sample=None,
         data[i+1:-1,:] = np.ma.masked
 
     # Mask incoherent echoes
-    data = np.ma.masked_where(ncp < min_ncp, data, copy=False)
-    data = np.ma.filled(data, fill_value)
+    data = np.ma.masked_where(ncp < min_ncp, data)
+    data = np.ma.filled(data, fill_value).astype(np.float64)
 
     # Parse sweep parameters
     # Need to add 1 to sweep index arrays in order to be consistent with
@@ -115,19 +115,22 @@ def _compute_field(radar, field, ray_window=3, gate_window=3, min_sample=None,
     return
 
 
-def add_textures(radar, fields, ray_window=3, gate_window=3, min_sample=None,
-                 min_ncp=0.5, min_sweep=None, max_sweep=None, fill_value=None,
-                 ncp_field=None):
+def add_textures(radar, fields=None, ray_window=3, gate_window=3,
+                 min_sample=None, min_ncp=0.5, min_sweep=None, max_sweep=None,
+                 fill_value=None, ncp_field=None):
     """
     """
 
     # Parse fill value
     if fill_value is None:
-        fill_value = get_field_name()
+        fill_value = get_fillvalue()
 
     # Parse field names
     if ncp_field is None:
         ncp_field = get_field_name('normalized_coherent_power')
+
+    if fields is None:
+        fields = radar.fields.keys()
 
     for field in fields:
         _compute_field(
@@ -199,7 +202,7 @@ def histogram_from_json(
     pdf = histogram_norm / np.sum(histogram_norm * np.diff(bin_edges))
 
     return {
-        'field': field,
+        'field': '{}_texture'.format(field),
         'histogram': histogram,
         'normalized histogram': histogram_norm,
         'probability density': pdf,

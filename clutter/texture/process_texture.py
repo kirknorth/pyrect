@@ -20,8 +20,8 @@ RAY_WINDOW = 5
 GATE_WINDOW = 5
 VCP_SWEEPS = 22
 VCP_RAYS = 7920
-MIN_SWEEP = None
-MAX_SWEEP = 0
+MIN_SWEEP = 3
+MAX_SWEEP = None
 
 # Define bins and limits for texture histograms
 BINS_PHIDP, LIMITS_PHIDP = 360, (0, 360)

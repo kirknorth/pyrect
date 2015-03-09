@@ -31,11 +31,12 @@ subroutine conditional_all(input, pdf, bins, zero, fill_value, &
 !        Only compute the conditional probability if the gate is valid
          if (is_valid(r,g)) then
 
-!           Compute the conditional probability of the input data given its
-!           probability density function
+!           Determine which bin the radar gate belongs to
             i = minloc(abs(bins - input(r,g)), dim=1)
 
-!           Check for zero probability
+!           Compute the conditional probability of the input data given its
+!           bin and corresponding probability density function
+!           Must also check for the zero probability condition
             if (pdf(i) >= zero) then
                P_cond(r,g) = pdf(i)
             else
