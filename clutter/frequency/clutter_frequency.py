@@ -32,8 +32,8 @@ def _pickle_map(clutter_map, filename, outdir=None):
 
 
 def map_date_range(start, stop, inpdir, stamp, date_str='[0-9]{12}',
-                   date_fmt='%y%m%d%H%M%S', min_ncp=0.5, vcp_sweeps=22,
-                   vcp_rays=7920, exclude_fields=None, ncp_field=None,
+                   date_fmt='%y%m%d%H%M%S', min_ncp=0.5, vcp_sweeps=None,
+                   vcp_rays=None, exclude_fields=None, ncp_field=None,
                    debug=False, verbose=False):
     """
     Compute the clutter frequency (probability) map within the specified date
@@ -82,23 +82,26 @@ def map_date_range(start, stop, inpdir, stamp, date_str='[0-9]{12}',
         # Read radar data
         radar = read(f, exclude_fields=exclude_fields)
 
-        # Make sure radar has proper number of sweeps
-        # This is a way to check that VCPs are consistent
-        if radar.nsweeps != vcp_sweeps or radar.nrays != vcp_rays:
+        # Check radar VCP
+        if vcp_sweeps is not None and radar.nsweeps != vcp_sweeps:
+            continue
+        if vcp_rays is not None and radar.nrays != vcp_rays:
             continue
 
-        # Find pixels that have a coherent signal
+        # Mask incoherent echoes
         ncp = radar.fields[ncp_field]['data']
-        ncp = np.ma.masked_where(ncp < min_ncp, ncp, copy=False)
-        clutter.append(np.logical_not(ncp.mask).astype(np.float64))
+        ncp = np.ma.masked_less(ncp, min_ncp, copy=False)
+
+        # Find pixels that have a coherent signal
+        clutter.append(np.logical_not(ncp.mask))
 
     # Compute the probability a pixel (gate) is clutter
     sample_size = len(clutter)
-    clutter_map = np.sum(clutter, axis=0) / sample_size
+    clutter_map = np.sum(clutter, axis=0).astype(np.float64) / sample_size
 
     # Add clutter frequency map to radar object
     clutter = {
-        'data': clutter_map.astype(np.float64),
+        'data': clutter_map,
         'long_name': 'Clutter frequency map',
         'standard_name': 'clutter_frequency_map',
         'valid_min': 0.0,
@@ -109,7 +112,7 @@ def map_date_range(start, stop, inpdir, stamp, date_str='[0-9]{12}',
     radar.add_field('clutter_frequency_map', clutter, replace_existing=False)
 
     return {
-        'clutter frequency map': clutter_map.astype(np.float64),
+        'clutter frequency map': clutter_map,
         'last radar': radar,
         'sample size': sample_size,
         'radar files': [os.path.basename(f) for f in files],
@@ -118,8 +121,8 @@ def map_date_range(start, stop, inpdir, stamp, date_str='[0-9]{12}',
     }
 
 
-def map_from_json(filename, inpdir=None, min_ncp=0.5, vcp_sweeps=22,
-                  vcp_rays=7920, exclude_fields=None, ncp_field=None,
+def map_from_json(filename, inpdir=None, min_ncp=0.5, vcp_sweeps=None,
+                  vcp_rays=None, exclude_fields=None, ncp_field=None,
                   debug=False, verbose=False):
     """
     Compute the clutter frequency (probability) map from the files listed in a
@@ -157,26 +160,29 @@ def map_from_json(filename, inpdir=None, min_ncp=0.5, vcp_sweeps=22,
         # Read radar data
         radar = read(f, exclude_fields=exclude_fields)
 
-        # Make sure radar has proper number of sweeps and rays
-        # This is a way to check that VCPs are consistent
-        if radar.nsweeps != vcp_sweeps or radar.nrays != vcp_rays:
+        # Check radar VCP
+        if vcp_sweeps is not None and radar.nsweeps != vcp_sweeps:
+            continue
+        if vcp_rays is not None and radar.nrays != vcp_rays:
             continue
 
         if verbose:
             print 'Processing file %s' % os.path.basename(f)
 
-        # Find pixels that have a coherent signal
+        # Mask incoherent echoes
         ncp = radar.fields[ncp_field]['data']
-        ncp = np.ma.masked_where(ncp < min_ncp, ncp, copy=False)
-        clutter.append(np.logical_not(ncp.mask).astype(np.float64))
+        ncp = np.ma.masked_less(ncp, min_ncp, copy=False)
+
+        # Find pixels that have a coherent signal
+        clutter.append(np.logical_not(ncp.mask))
 
     # Compute the probability a pixel (gate) is clutter
     sample_size = len(clutter)
-    clutter_map = np.sum(clutter, axis=0) / sample_size
+    clutter_map = np.sum(clutter, axis=0).astype(np.float64) / sample_size
 
     # Add clutter frequency map to radar object
     clutter = {
-        'data': clutter_map.astype(np.float64),
+        'data': clutter_map,
         'long_name': 'Clutter frequency map',
         'standard_name': 'clutter_frequency_map',
         'valid_min': 0.0,
@@ -187,7 +193,7 @@ def map_from_json(filename, inpdir=None, min_ncp=0.5, vcp_sweeps=22,
     radar.add_field('clutter_frequency_map', clutter, replace_existing=False)
 
     return {
-        'clutter frequency map': clutter_map.astype(np.float64),
+        'clutter frequency map': clutter_map,
         'last radar': radar,
         'sample size': sample_size,
         'radar files': [os.path.basename(f) for f in files],
