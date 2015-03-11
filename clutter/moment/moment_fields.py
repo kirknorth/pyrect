@@ -34,7 +34,7 @@ def _pickle_histograms(histograms, filename, outdir=None):
 
 def histogram_from_json(
         filename, field, inpdir=None, bins=10, limits=None, min_ncp=0.5,
-        vcp_sweeps=22, vcp_rays=7920, min_sweep=None, max_sweep=None,
+        vcp_sweeps=None, vcp_rays=None, min_sweep=None, max_sweep=None,
         exclude_fields=None, fill_value=None, ncp_field=None, verbose=False):
     """
     """
@@ -65,7 +65,10 @@ def histogram_from_json(
         # Read radar data
         radar = read(f, exclude_fields=exclude_fields)
 
-        if radar.nsweeps != vcp_sweeps or radar.nrays != vcp_rays:
+        # Check radar VCP
+        if vcp_sweeps is not None and radar.nsweeps != vcp_sweeps:
+            continue
+        if vcp_rays is not None and radar.nrays != vcp_rays:
             continue
 
         if verbose:
@@ -78,11 +81,10 @@ def histogram_from_json(
         # Mask sweeps outside specified range
         if min_sweep is not None:
             i = radar.sweep_start_ray_index['data'][min_sweep]
-            data[0:i,:] = np.ma.masked
-
+            data[:i+1,:] = np.ma.masked
         if max_sweep is not None:
             i = radar.sweep_end_ray_index['data'][max_sweep]
-            data[i+1:-1,:] = np.ma.masked
+            data[i+1:,:] = np.ma.masked
 
         # Mask incoherent echoes
         data = np.ma.masked_where(ncp < min_ncp, data)
