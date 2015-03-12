@@ -7,11 +7,28 @@ import numpy as np
 import matplotlib.pyplot as plt
 
 from matplotlib import rcParams
-from matplotlib.colors import BoundaryNorm
 from matplotlib.ticker import MultipleLocator
 
 from pyart.config import get_field_name
 
+### GLOBAL VARIABLES ###
+
+# Input directory to moments data
+INPDIR = '/aos/home/kirk/projects/clutter-classification/clutter/calibration'
+
+# Pickled moments data
+PRECIP = 'sgpxsaprppiI4.precip.moments.pkl'
+GROUND = 'sgpxsaprppiI4.ground.moments.pkl'
+INSECTS = 'sgpxsaprppiI4.insects.moments.pkl'
+
+
+# Parse field names
+refl_field = get_field_name('reflectivity')
+vdop_field = get_field_name('velocity')
+sw_field = get_field_name('spectrum_width')
+rhv_field = get_field_name('cross_correlation_ratio')
+zdr_field = get_field_name('differential_reflectivity')
+ncp_field = get_field_name('normalized_coherent_power')
 
 ### Set figure parameters ###
 rcParams['axes.linewidth'] = 1.5
@@ -25,7 +42,7 @@ rcParams['ytick.minor.size'] = 2
 rcParams['ytick.minor.width'] = 1
 
 
-def histograms(precip, nonprecip, image, outdir=None, dpi=100, verbose=False):
+def all_classes(image, outdir=None, dpi=100, verbose=False):
     """
     """
 
@@ -34,31 +51,48 @@ def histograms(precip, nonprecip, image, outdir=None, dpi=100, verbose=False):
         outdir = ''
 
     # Read pickled data
-    with open(precip, 'rb') as fid:
-        precip_data = pickle.load(fid)
-    with open(nonprecip, 'rb') as fid:
-        nonprecip_data = pickle.load(fid)
+    with open(os.path.join(INPDIR, PRECIP), 'rb') as fid:
+        data_p = pickle.load(fid)
+    with open(os.path.join(INPDIR, GROUND), 'rb') as fid:
+        data_g = pickle.load(fid)
+    with open(os.path.join(INPDIR, INSECTS), 'rb') as fid:
+        data_i = pickle.load(fid)
 
     if verbose:
-        print 'Precipitation data: %s' % precip_data.keys()
-        print 'Non-precipitation data: %s' % nonprecip_data.keys()
+        print 'Precipitation data: %s' % data_p.keys()
+        print 'Ground clutter data: %s' % data_g.keys()
+        print 'Insects data: %s' % data_i.keys()
 
     # Parse moments data
-    vdop_p = precip_data['velocity']
-    vdop_np = nonprecip_data['velocity']
-    sw_p = precip_data['spectrum_width']
-    sw_np = nonprecip_data['spectrum_width']
-    rhohv_p = precip_data['cross_correlation_ratio']
-    rhohv_np = nonprecip_data['cross_correlation_ratio']
+    refl_p = data_p[refl_field]
+    refl_g = data_g[refl_field]
+    refl_i = data_i[refl_field]
+    vdop_p = data_p[vdop_field]
+    vdop_g = data_g[vdop_field]
+    vdop_i = data_i[vdop_field]
+    sw_p = data_p[sw_field]
+    sw_g = data_g[sw_field]
+    sw_i = data_i[sw_field]
+    rhohv_p = data_p[rhv_field]
+    rhohv_g = data_g[rhv_field]
+    rhohv_i = data_i[rhv_field]
+    zdr_p = data_p[zdr_field]
+    zdr_g = data_g[zdr_field]
+    zdr_i = data_i[zdr_field]
+    ncp_p = data_p[ncp_field]
+    ncp_g = data_g[ncp_field]
+    ncp_i = data_i[ncp_field]
 
-    fig = plt.figure(figsize=(18, 4))
+    fig = plt.figure(figsize=(18, 10))
 
     # (a) Doppler velocity
-    axa = fig.add_subplot(141, xlim=(-20, 20), ylim=(0, 1))
+    axa = fig.add_subplot(231, xlim=(-20, 20), ylim=(0, 1))
     axa.plot(vdop_p['bin centers'], vdop_p['normalized histogram'], 'k-',
              linewidth=2, label='Precip')
-    axa.plot(vdop_np['bin centers'], vdop_np['normalized histogram'], 'r-',
-             linewidth=2, label='Non-precip')
+    axa.plot(vdop_g['bin centers'], vdop_g['normalized histogram'], 'r-',
+             linewidth=2, label='Ground')
+    axa.plot(vdop_i['bin centers'], vdop_i['normalized histogram'], 'b-',
+             linewidth=2, label='Insects')
     axa.xaxis.set_major_locator(MultipleLocator(5))
     axa.xaxis.set_minor_locator(MultipleLocator(1))
     axa.yaxis.set_major_locator(MultipleLocator(0.2))
@@ -69,11 +103,13 @@ def histograms(precip, nonprecip, image, outdir=None, dpi=100, verbose=False):
     axa.grid(which='major')
 
     # (b) Spectrum width
-    axb = fig.add_subplot(142, xlim=(0, 5), ylim=(0, 1))
+    axb = fig.add_subplot(232, xlim=(0, 5), ylim=(0, 1))
     axb.plot(sw_p['bin centers'], sw_p['normalized histogram'], 'k-',
              linewidth=2, label='Precip')
-    axb.plot(sw_np['bin centers'], sw_np['normalized histogram'], 'r-',
-             linewidth=2, label='Non-precip')
+    axb.plot(sw_g['bin centers'], sw_g['normalized histogram'], 'r-',
+             linewidth=2, label='Ground')
+    axb.plot(sw_i['bin centers'], sw_i['normalized histogram'], 'b-',
+             linewidth=2, label='Insects')
     axb.xaxis.set_major_locator(MultipleLocator(1))
     axb.xaxis.set_minor_locator(MultipleLocator(0.5))
     axb.yaxis.set_major_locator(MultipleLocator(0.2))
@@ -82,12 +118,14 @@ def histograms(precip, nonprecip, image, outdir=None, dpi=100, verbose=False):
     axb.set_title('Spectrum width')
     axb.grid(which='major')
 
-    # (c) Copolar correlation texture
-    axc = fig.add_subplot(143, xlim=(0, 1), ylim=(0, 1))
+    # (c) Copolar correlation
+    axc = fig.add_subplot(233, xlim=(0, 1), ylim=(0, 1))
     axc.plot(rhohv_p['bin centers'], rhohv_p['normalized histogram'], 'k-',
              linewidth=2, label='Precip')
-    axc.plot(rhohv_np['bin centers'], rhohv_np['normalized histogram'], 'r-',
-             linewidth=2, label='Non-precip')
+    axc.plot(rhohv_g['bin centers'], rhohv_g['normalized histogram'], 'r-',
+             linewidth=2, label='Ground')
+    axc.plot(rhohv_i['bin centers'], rhohv_i['normalized histogram'], 'b-',
+             linewidth=2, label='Insects')
     axc.xaxis.set_major_locator(MultipleLocator(0.2))
     axc.xaxis.set_minor_locator(MultipleLocator(0.1))
     axc.yaxis.set_major_locator(MultipleLocator(0.2))
@@ -95,8 +133,55 @@ def histograms(precip, nonprecip, image, outdir=None, dpi=100, verbose=False):
     axc.set_title('Copolar correlation coefficient')
     axc.grid(which='major')
 
+    # (d) Differential reflectivity
+    axd = fig.add_subplot(234, xlim=(-20, 25), ylim=(0, 1))
+    axd.plot(zdr_p['bin centers'], zdr_p['normalized histogram'], 'k-',
+             linewidth=2, label='Precip')
+    axd.plot(zdr_g['bin centers'], zdr_g['normalized histogram'], 'r-',
+             linewidth=2, label='Ground')
+    axd.plot(zdr_i['bin centers'], zdr_i['normalized histogram'], 'b-',
+             linewidth=2, label='Insects')
+    axd.xaxis.set_major_locator(MultipleLocator(5))
+    axd.xaxis.set_minor_locator(MultipleLocator(1))
+    axd.yaxis.set_major_locator(MultipleLocator(0.2))
+    axd.yaxis.set_major_locator(MultipleLocator(0.1))
+    axd.set_xlabel('(dB)')
+    axd.set_title('Differential reflectivity')
+    axd.grid(which='major')
+
+    # (e) Normalized coherent power
+    axe = fig.add_subplot(235, xlim=(0, 1), ylim=(0, 1))
+    axe.plot(ncp_p['bin centers'], ncp_p['normalized histogram'], 'k-',
+             linewidth=2, label='Precip')
+    axe.plot(ncp_g['bin centers'], ncp_g['normalized histogram'], 'r-',
+             linewidth=2, label='Ground')
+    axe.plot(ncp_i['bin centers'], ncp_i['normalized histogram'], 'b-',
+             linewidth=2, label='Insects')
+    axe.xaxis.set_major_locator(MultipleLocator(0.2))
+    axe.xaxis.set_minor_locator(MultipleLocator(0.1))
+    axe.yaxis.set_major_locator(MultipleLocator(0.2))
+    axe.yaxis.set_major_locator(MultipleLocator(0.1))
+    axe.set_title('Normalized coherent power')
+    axe.grid(which='major')
+
+    # (f) Reflectivity
+    axf = fig.add_subplot(236, xlim=(-40, 50), ylim=(0, 1))
+    axf.plot(refl_p['bin centers'], refl_p['normalized histogram'], 'k-',
+             linewidth=2, label='Precip')
+    axf.plot(refl_g['bin centers'], refl_g['normalized histogram'], 'r-',
+             linewidth=2, label='Ground')
+    axf.plot(refl_i['bin centers'], refl_i['normalized histogram'], 'b-',
+             linewidth=2, label='Insects')
+    axf.xaxis.set_major_locator(MultipleLocator(10))
+    axf.xaxis.set_minor_locator(MultipleLocator(5))
+    axf.yaxis.set_major_locator(MultipleLocator(0.2))
+    axf.yaxis.set_major_locator(MultipleLocator(0.1))
+    axf.set_xlabel('(dBZ)')
+    axf.set_title('Reflectivity')
+    axf.grid(which='major')
+
     # Add legend
-    axc.legend(loc=[1.03, 0.4])
+    axf.legend(loc=[1.05, 0.9])
 
     # Save figure
     fig.savefig(os.path.join(outdir, image), format='png', dpi=dpi,
@@ -110,8 +195,6 @@ if __name__ == '__main__':
 
     # Parse command line arguments
     parser = argparse.ArgumentParser(description=None)
-    parser.add_argument('precip', type=str, help=None)
-    parser.add_argument('nonprecip', type=str, help=None)
     parser.add_argument('image', type=str, help=None)
     parser.add_argument('--outdir', nargs='?', type=str, const='', default='',
                         help=None)
@@ -124,13 +207,10 @@ if __name__ == '__main__':
     args = parser.parse_args()
 
     if args.debug:
-        print 'precip = %s' % args.precip
-        print 'nonprecip = %s' % args.nonprecip
         print 'image = %s' % args.image
         print 'outdir = %s' % args.outdir
         print 'dpi = %i' % args.dpi
 
     # Call desired plotting function
-    histograms(
-        args.precip, args.nonprecip, args.image, outdir=args.outdir,
-        dpi=args.dpi, verbose=args.verbose)
+    all_classes(
+        args.image, outdir=args.outdir, dpi=args.dpi, verbose=args.verbose)
