@@ -14,34 +14,39 @@ from clutter.texture import texture_fields
 ########################
 
 # Define basic values and thresholds
-MIN_NCP = 0.5
-MIN_SAMPLE = 10
-RAY_WINDOW = 5
-GATE_WINDOW = 5
+MIN_NCP = 0.3
+MIN_SAMPLE = 5
+RAY_WINDOW = 3
+GATE_WINDOW = 3
 VCP_SWEEPS = 22
-VCP_RAYS = 7920
-MIN_SWEEP = 3
+VCP_RAYS = None
+MIN_SWEEP = 2
 MAX_SWEEP = None
 
 # Define bins and limits for texture histograms
+BINS_REFL, LIMITS_REFL = 100, (0, 30)
+BINS_VDOP, LIMITS_VDOP = 150, (0, 15)
+BINS_SW, LIMITS_SW = 100, (0, 10)
 BINS_PHIDP, LIMITS_PHIDP = 360, (0, 360)
 BINS_ZDR, LIMITS_ZDR = 150, (0, 15)
 BINS_RHOHV, LIMITS_RHOHV = 50, (0, 1)
-BINS_REFL, LIMITS_REFL = 100, (0, 30)
+BINS_NCP, LIMITS_NCP = 50, (0, 1)
+
 
 # Define fields to exclude from radar object
 EXCLUDE_FIELDS = [
     'radar_echo_classification',
-    'spectrum_width',
     'corrected_reflectivity'
     ]
 
 # Parse field names
-ncp_field = get_field_name('normalized_coherent_power')
 refl_field = get_field_name('reflectivity')
+vdop_field = get_field_name('velocity')
+sw_field = get_field_name('spectrum_width')
 phidp_field = get_field_name('differential_phase')
 zdr_field = get_field_name('differential_reflectivity')
 rhohv_field = get_field_name('cross_correlation_ratio')
+ncp_field = get_field_name('normalized_coherent_power')
 
 
 if __name__ == '__main__':
@@ -71,36 +76,14 @@ if __name__ == '__main__':
         print 'MIN_SAMPLE = %i' % MIN_SAMPLE
         print 'RAY_WINDOW = %i' % RAY_WINDOW
         print 'GATE_WINDOW = %i' % GATE_WINDOW
-        print 'VCP_SWEEPS = %i' % VCP_SWEEPS
-        print 'VCP_RAYS = %i' % VCP_RAYS
+        print 'VCP_SWEEPS = %s' % VCP_SWEEPS
+        print 'VCP_RAYS = %s' % VCP_RAYS
         print 'MIN_SWEEP = %s' % MIN_SWEEP
         print 'MAX_SWEEP = %s' % MAX_SWEEP
 
     # Compute histograms for specified fields
-    phidp = texture_fields.histogram_from_json(
-        args.json, phidp_field, inpdir=args.inpdir, ray_window=RAY_WINDOW,
-        gate_window=GATE_WINDOW, min_sample=MIN_SAMPLE, bins=BINS_PHIDP,
-        limits=LIMITS_PHIDP, min_ncp=MIN_NCP, vcp_sweeps=VCP_SWEEPS,
-        vcp_rays=VCP_RAYS, min_sweep=MIN_SWEEP, max_sweep=MAX_SWEEP,
-        exclude_fields=EXCLUDE_FIELDS, fill_value=None, ncp_field=ncp_field,
-        verbose=args.verbose)
-
-    zdr = texture_fields.histogram_from_json(
-        args.json, zdr_field, inpdir=args.inpdir, ray_window=RAY_WINDOW,
-        gate_window=GATE_WINDOW, min_sample=MIN_SAMPLE, bins=BINS_ZDR,
-        limits=LIMITS_ZDR, min_ncp=MIN_NCP, vcp_sweeps=VCP_SWEEPS,
-        vcp_rays=VCP_RAYS, min_sweep=MIN_SWEEP, max_sweep=MAX_SWEEP,
-        exclude_fields=EXCLUDE_FIELDS, fill_value=None, ncp_field=ncp_field,
-        verbose=args.verbose)
-
-    rhohv = texture_fields.histogram_from_json(
-        args.json, rhohv_field, inpdir=args.inpdir, ray_window=RAY_WINDOW,
-        gate_window=GATE_WINDOW, min_sample=MIN_SAMPLE, bins=BINS_RHOHV,
-        limits=LIMITS_RHOHV, min_ncp=MIN_NCP, vcp_sweeps=VCP_SWEEPS,
-        vcp_rays=VCP_RAYS, min_sweep=MIN_SWEEP, max_sweep=MAX_SWEEP,
-        exclude_fields=EXCLUDE_FIELDS, fill_value=None, ncp_field=ncp_field,
-        verbose=args.verbose)
-
+    if args.verbose:
+        print 'Processing reflectivity'
     refl = texture_fields.histogram_from_json(
         args.json, refl_field, inpdir=args.inpdir, ray_window=RAY_WINDOW,
         gate_window=GATE_WINDOW, min_sample=MIN_SAMPLE, bins=BINS_REFL,
@@ -109,8 +92,68 @@ if __name__ == '__main__':
         exclude_fields=EXCLUDE_FIELDS, fill_value=None, ncp_field=ncp_field,
         verbose=args.verbose)
 
+    if args.verbose:
+        print 'Processing Doppler velocity'
+    vdop = texture_fields.histogram_from_json(
+        args.json, vdop_field, inpdir=args.inpdir, ray_window=RAY_WINDOW,
+        gate_window=GATE_WINDOW, min_sample=MIN_SAMPLE, bins=BINS_VDOP,
+        limits=LIMITS_VDOP, min_ncp=MIN_NCP, vcp_sweeps=VCP_SWEEPS,
+        vcp_rays=VCP_RAYS, min_sweep=MIN_SWEEP, max_sweep=MAX_SWEEP,
+        exclude_fields=EXCLUDE_FIELDS, fill_value=None, ncp_field=ncp_field,
+        verbose=args.verbose)
+
+    if args.verbose:
+        print 'Processing spectrum width'
+    sw = texture_fields.histogram_from_json(
+        args.json, sw_field, inpdir=args.inpdir, ray_window=RAY_WINDOW,
+        gate_window=GATE_WINDOW, min_sample=MIN_SAMPLE, bins=BINS_SW,
+        limits=LIMITS_SW, min_ncp=MIN_NCP, vcp_sweeps=VCP_SWEEPS,
+        vcp_rays=VCP_RAYS, min_sweep=MIN_SWEEP, max_sweep=MAX_SWEEP,
+        exclude_fields=EXCLUDE_FIELDS, fill_value=None, ncp_field=ncp_field,
+        verbose=args.verbose)
+
+    if args.verbose:
+        print 'Processing differential phase'
+    phidp = texture_fields.histogram_from_json(
+        args.json, phidp_field, inpdir=args.inpdir, ray_window=RAY_WINDOW,
+        gate_window=GATE_WINDOW, min_sample=MIN_SAMPLE, bins=BINS_PHIDP,
+        limits=LIMITS_PHIDP, min_ncp=MIN_NCP, vcp_sweeps=VCP_SWEEPS,
+        vcp_rays=VCP_RAYS, min_sweep=MIN_SWEEP, max_sweep=MAX_SWEEP,
+        exclude_fields=EXCLUDE_FIELDS, fill_value=None, ncp_field=ncp_field,
+        verbose=args.verbose)
+
+    if args.verbose:
+        print 'Processing differential reflectivity'
+    zdr = texture_fields.histogram_from_json(
+        args.json, zdr_field, inpdir=args.inpdir, ray_window=RAY_WINDOW,
+        gate_window=GATE_WINDOW, min_sample=MIN_SAMPLE, bins=BINS_ZDR,
+        limits=LIMITS_ZDR, min_ncp=MIN_NCP, vcp_sweeps=VCP_SWEEPS,
+        vcp_rays=VCP_RAYS, min_sweep=MIN_SWEEP, max_sweep=MAX_SWEEP,
+        exclude_fields=EXCLUDE_FIELDS, fill_value=None, ncp_field=ncp_field,
+        verbose=args.verbose)
+
+    if args.verbose:
+        print 'Processing copolar correlation'
+    rhohv = texture_fields.histogram_from_json(
+        args.json, rhohv_field, inpdir=args.inpdir, ray_window=RAY_WINDOW,
+        gate_window=GATE_WINDOW, min_sample=MIN_SAMPLE, bins=BINS_RHOHV,
+        limits=LIMITS_RHOHV, min_ncp=MIN_NCP, vcp_sweeps=VCP_SWEEPS,
+        vcp_rays=VCP_RAYS, min_sweep=MIN_SWEEP, max_sweep=MAX_SWEEP,
+        exclude_fields=EXCLUDE_FIELDS, fill_value=None, ncp_field=ncp_field,
+        verbose=args.verbose)
+
+    if args.verbose:
+        print 'Processing normalized coherent power'
+    ncp = texture_fields.histogram_from_json(
+        args.json, ncp_field, inpdir=args.inpdir, ray_window=RAY_WINDOW,
+        gate_window=GATE_WINDOW, min_sample=MIN_SAMPLE, bins=BINS_NCP,
+        limits=LIMITS_NCP, min_ncp=MIN_NCP, vcp_sweeps=VCP_SWEEPS,
+        vcp_rays=VCP_RAYS, min_sweep=MIN_SWEEP, max_sweep=MAX_SWEEP,
+        exclude_fields=EXCLUDE_FIELDS, fill_value=None, ncp_field=ncp_field,
+        verbose=args.verbose)
+
     # Pack histograms together
-    histograms = [phidp, zdr, rhohv, refl]
+    histograms = [refl, vdop, sw, phidp, zdr, rhohv, ncp]
 
     # Pickle texture histograms
     texture_fields._pickle_histograms(
