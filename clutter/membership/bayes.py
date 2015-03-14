@@ -31,8 +31,9 @@ def _cond_prob(xi, pdf, bins, zero=1.0e-10):
 
 def classify(radar, textures=None, moments=None, clutter_map=None, weights=1.0,
              class_prob='equal', min_inputs=1, min_ncp=0.3, zero=1.0e-10,
-             ignore_inputs=None, fill_value=None, ncp_field=None,
-             precip_field=None, clutter_field=None, verbose=False):
+             ignore_inputs=None, use_insects=True, fill_value=None,
+             ncp_field=None, precip_field=None, ground_field=None,
+             insect_field=None, verbose=False):
     """
     """
 
@@ -45,8 +46,10 @@ def classify(radar, textures=None, moments=None, clutter_map=None, weights=1.0,
         ncp_field = get_field_name('normalized_coherent_power')
     if precip_field is None:
         precip_field = 'precipitation'
-    if clutter_field is None:
-        clutter_field = 'non-precipitation'
+    if ground_field is None:
+        ground_field = 'ground_clutter'
+    if insect_field is None:
+        insect_field = 'insects'
 
     # Parse ignore fields
     if ignore_inputs is None:
@@ -56,11 +59,33 @@ def classify(radar, textures=None, moments=None, clutter_map=None, weights=1.0,
     if textures is None and moments is None and clutter_map is None:
         raise ValueError('No inputs specified')
 
-    # Check if precipitation and non-precipitation fields are present for
-    # textures and moments
+    # Parse classification labels
+    if use_insects:
+        labels = [precip_field, ground_field, insect_field]
+    else:
+        labels = [precip_field, ground_field]
+        if textures is not None:
+            textures.pop(insect_field, None)
+        if moments is not None:
+            moments.pop(insect_field, None)
 
-    # TODO: parse number of inputs for each class
-    n = 1.0
+    # Determine total number of inputs available for each class
+    inputs = {label: 0 for label in labels}
+    if textures is not None:
+        for label, texture in textures.iteritems():
+            fields = [field for field in texture if field not in ignore_inputs]
+            inputs[label] += len(fields)
+    if moments is not None:
+        for label, moment in moments.iteritems():
+            fields = [field for field in moment if field not in ignore_inputs]
+            inputs[label] += len(fields)
+    if clutter_map is not None:
+        inputs[ground_field] += 1
+
+    if verbose:
+        for label in labels:
+            print 'Total number of inputs for {} = {}'.format(
+                label, inputs[label])
 
     # Parse class probability P(c)
     if class_prob.upper() == 'EQUAL':
@@ -70,22 +95,15 @@ def classify(radar, textures=None, moments=None, clutter_map=None, weights=1.0,
     if isinstance(weights, float):
         P_xi = weights
 
-    # Initialize number of inputs array
-    num_inputs = np.zeros_like(
-        radar.fields[ncp_field]['data'].data, dtype=np.int32)
-
     # Initialize total probability and number of inputs arrays
     P_tot = {
         label: np.ones(radar.fields[ncp_field]['data'].shape, dtype=np.float64)
-        for label in [precip_field, clutter_field]
+        for label in labels
         }
     num_inputs = {
         label: np.zeros(radar.fields[ncp_field]['data'].shape, dtype=np.int32)
-        for label in [precip_field, clutter_field]
+        for label in labels
         }
-
-    # Parse normalized coherent power
-    ncp = radar.fields[ncp_field]['data']
 
     # Process radar texture fields
     if textures is not None:
@@ -101,7 +119,11 @@ def classify(radar, textures=None, moments=None, clutter_map=None, weights=1.0,
                 bins = histogram['bin centers']
 
                 # Mask incoherent gates
-                data = np.ma.masked_where(ncp < min_ncp, data)
+                if min_ncp is not None:
+                    ncp = radar.fields[ncp_field]['data']
+                    data = np.ma.masked_where(ncp < min_ncp, data)
+
+                # Fill in masked values
                 data = np.ma.filled(data, fill_value)
 
                 # Compute conditional probability for each radar gate
@@ -129,7 +151,11 @@ def classify(radar, textures=None, moments=None, clutter_map=None, weights=1.0,
                 bins = histogram['bin centers']
 
                 # Mask incoherent gates
-                data = np.ma.masked_where(ncp < min_ncp, data)
+                if min_ncp is not None:
+                    ncp = radar.fields[ncp_field]['data']
+                    data = np.ma.masked_where(ncp < min_ncp, data)
+
+                # Fill in masked values
                 data = np.ma.filled(data, fill_value)
 
                 # Compute conditional probability for each radar gate
@@ -152,10 +178,22 @@ def classify(radar, textures=None, moments=None, clutter_map=None, weights=1.0,
         P_tot[label] = np.ma.masked_where(
             sample_size < min_inputs, P_tot[label])
 
-    # Determine where the clutter (non-precipitating) class has the highest
-    # probability
-    is_clutter = P_tot[clutter_field] >= P_tot[precip_field]
-    mask = np.ma.filled(is_clutter.astype(np.int32), -1)
+    # Determine where each class is most probable
+    if use_insects:
+        is_ground = np.logical_and(
+            P_tot[ground_field] > P_tot[precip_field],
+            P_tot[ground_field] > P_tot[insect_field])
+        is_insect = np.logical_and(
+            P_tot[insect_field] > P_tot[ground_field],
+            P_tot[insect_field] > P_tot[precip_field])
+        mask = is_ground.astype(np.int32)
+        mask[is_insect] = 2
+        mask = np.ma.filled(mask, -1)
+
+    else:
+        is_ground = P_tot[ground_field] > P_tot[precip_field]
+        mask = np.ma.filled(is_ground.astype(np.int32), -1)
+
 
     mask = {
         'data': mask.astype(np.int32),
@@ -164,7 +202,7 @@ def classify(radar, textures=None, moments=None, clutter_map=None, weights=1.0,
         '_FillValue': None,
         'units': None,
         'comment': ('-1 = Missing gate, 0 = Valid echo (precipitation), '
-                    '1 = Clutter (non-precipitation)')
+                    '1 = Ground clutter, 2 = Insects')
     }
     radar.add_field('clutter_classification', mask, replace_existing=True)
 

@@ -61,8 +61,7 @@ def _compute_field(radar, field, ray_window=3, gate_window=3, min_sample=None,
     if ncp_field is None:
         ncp_field = get_field_name('normalized_coherent_power')
 
-    # Parse fields
-    ncp = radar.fields[ncp_field]['data']
+    # Parse radar field
     data = radar.fields[field]['data']
 
     # Mask sweeps outside of specified range
@@ -74,7 +73,11 @@ def _compute_field(radar, field, ray_window=3, gate_window=3, min_sample=None,
         data[i+1:,:] = np.ma.masked
 
     # Mask incoherent echoes
-    data = np.ma.masked_where(ncp < min_ncp, data)
+    if min_ncp is not None:
+        ncp = radar.fields[ncp_field]['data']
+        data = np.ma.masked_where(ncp < min_ncp, data)
+
+    # Fill in masked values
     data = np.ma.filled(data, fill_value).astype(np.float64)
 
     # Parse sweep parameters

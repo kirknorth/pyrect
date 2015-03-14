@@ -74,8 +74,7 @@ def histogram_from_json(
         if verbose:
             print 'Processing file %s' % os.path.basename(f)
 
-        # Parse radar data
-        ncp = radar.fields[ncp_field]['data']
+        # Parse radar fields
         data = radar.fields[field]['data']
 
         # Mask sweeps outside specified range
@@ -87,7 +86,9 @@ def histogram_from_json(
             data[i+1:,:] = np.ma.masked
 
         # Mask incoherent echoes
-        data = np.ma.masked_where(ncp < min_ncp, data)
+        if min_ncp is not None:
+            ncp = radar.fields[ncp_field]['data']
+            data = np.ma.masked_where(ncp < min_ncp, data)
 
         # Bin data and compute frequencies
         hist, bin_edges = np.histogram(
