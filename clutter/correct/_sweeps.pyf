@@ -1,0 +1,35 @@
+!    -*- f90 -*-
+! Note: the context of this file is case sensitive.
+
+python module sweeps ! in 
+    interface  ! in :sweeps
+        subroutine mean_fill(input,sweep_start,sweep_end,ray_window,gate_window,min_sample,fill_value,ns,nr,ng) ! in :sweeps:src/sweeps.f90
+            real(kind=8) dimension(nr,ng),intent(inout) :: input
+            integer(kind=4) dimension(ns),intent(in) :: sweep_start
+            integer(kind=4) dimension(ns),intent(in),depend(ns) :: sweep_end
+            integer(kind=4) intent(in) :: ray_window
+            integer(kind=4) intent(in) :: gate_window
+            integer(kind=4) intent(in) :: min_sample
+            real(kind=8) intent(in) :: fill_value
+            integer(kind=4), optional,intent(in),check(len(sweep_start)>=ns),depend(sweep_start) :: ns=len(sweep_start)
+            integer(kind=4), optional,intent(in),check(shape(input,0)==nr),depend(input) :: nr=shape(input,0)
+            integer(kind=4), optional,intent(in),check(shape(input,1)==ng),depend(input) :: ng=shape(input,1)
+        end subroutine mean_fill
+        subroutine remove_salt(input,sweep_start,sweep_end,ray_window,gate_window,min_sample,rays_wrap,fill_value,ns,nr,ng) ! in :sweeps:src/sweeps.f90
+            real(kind=8) dimension(nr,ng),intent(inout) :: input
+            integer(kind=4) dimension(ns),intent(in) :: sweep_start
+            integer(kind=4) dimension(ns),intent(in),depend(ns) :: sweep_end
+            integer(kind=4) intent(in) :: ray_window
+            integer(kind=4) intent(in) :: gate_window
+            integer(kind=4) intent(in) :: min_sample
+            logical intent(in) :: rays_wrap
+            real(kind=8) intent(in) :: fill_value
+            integer(kind=4), optional,intent(in),check(len(sweep_start)>=ns),depend(sweep_start) :: ns=len(sweep_start)
+            integer(kind=4), optional,intent(in),check(shape(input,0)==nr),depend(input) :: nr=shape(input,0)
+            integer(kind=4), optional,intent(in),check(shape(input,1)==ng),depend(input) :: ng=shape(input,1)
+        end subroutine remove_salt
+    end interface 
+end python module sweeps
+
+! This file was auto-generated with f2py (version:2).
+! See http://cens.ioc.ee/projects/f2py2e/
