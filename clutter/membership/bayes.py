@@ -29,11 +29,11 @@ def _cond_prob(xi, pdf, bins, zero=1.0e-10):
     return P
 
 
-def classify(radar, textures=None, moments=None, clutter_map=None, weights=1.0,
-             class_prob='equal', min_inputs=1, min_ncp=0.3, zero=1.0e-10,
-             ignore_inputs=None, use_insects=True, fill_value=None,
-             ncp_field=None, precip_field=None, ground_field=None,
-             insect_field=None, verbose=False):
+def classify(radar, textures=None, moments=None, clutter_map=None,
+             gatefilter=None, weights=1.0, class_prob='equal', min_inputs=1,
+             min_ncp=None, zero=1.0e-10, ignore_inputs=None, use_insects=True,
+             fill_value=None, ncp_field=None, precip_field=None,
+             ground_field=None, insect_field=None, verbose=False):
     """
     """
 
@@ -123,8 +123,9 @@ def classify(radar, textures=None, moments=None, clutter_map=None, weights=1.0,
                     ncp = radar.fields[ncp_field]['data']
                     data = np.ma.masked_where(ncp < min_ncp, data)
 
-                # Fill in masked values
+                # Prepare data for ingest into Fortran wrapper
                 data = np.ma.filled(data, fill_value)
+                data = np.asfortranarray(data, dtype=np.float64)
 
                 # Compute conditional probability for each radar gate
                 P_cond = member.conditional_all(
@@ -155,8 +156,9 @@ def classify(radar, textures=None, moments=None, clutter_map=None, weights=1.0,
                     ncp = radar.fields[ncp_field]['data']
                     data = np.ma.masked_where(ncp < min_ncp, data)
 
-                # Fill in masked values
+                # Prepare data for ingest into Fortran wrapper
                 data = np.ma.filled(data, fill_value)
+                data = np.asfortranarray(data, dtype=np.float64)
 
                 # Compute conditional probability for each radar gate
                 P_cond = member.conditional_all(
@@ -178,7 +180,14 @@ def classify(radar, textures=None, moments=None, clutter_map=None, weights=1.0,
         P_tot[label] = np.ma.masked_where(
             sample_size < min_inputs, P_tot[label])
 
+    # Mask gates using gate filter
+    if gatefilter is not None:
+        for label in P_tot:
+            P_tot[label] = np.ma.masked_where(
+                gatefilter.gate_excluded, P_tot[label])
+
     # Determine where each class is most probable
+    echo = np.zeros(P_tot[precip_field].shape, dtype=np.int32)
     if use_insects:
         is_ground = np.logical_and(
             P_tot[ground_field] > P_tot[precip_field],
@@ -186,24 +195,27 @@ def classify(radar, textures=None, moments=None, clutter_map=None, weights=1.0,
         is_insect = np.logical_and(
             P_tot[insect_field] > P_tot[ground_field],
             P_tot[insect_field] > P_tot[precip_field])
-        mask = is_ground.astype(np.int32)
-        mask[is_insect] = 2
-        mask = np.ma.filled(mask, -1)
+        is_missing = P_tot[ground_field].mask
+        echo[is_ground] = 1
+        echo[is_insect] = 2
+        echo[is_missing] = -1
 
     else:
         is_ground = P_tot[ground_field] > P_tot[precip_field]
-        mask = np.ma.filled(is_ground.astype(np.int32), -1)
+        is_missing = P_tot[ground_field].mask
+        echo[is_ground] = 1
+        echo[is_missing] = -1
 
-
-    mask = {
-        'data': mask.astype(np.int32),
-        'long_name': 'Clutter classification',
-        'standard_name': 'clutter_classification',
+    # Create echo classification dictionary and add it to the radar object
+    echo = {
+        'data': echo,
+        'long_name': 'Echo classification',
+        'standard_name': 'echo_classification',
         '_FillValue': None,
         'units': None,
-        'comment': ('-1 = Missing gate, 0 = Valid echo (precipitation), '
+        'comment': ('-1 = Missing gate, 0 = cloud or precipitation, '
                     '1 = Ground clutter, 2 = Insects')
     }
-    radar.add_field('clutter_classification', mask, replace_existing=True)
+    radar.add_field('echo_classification', echo, replace_existing=True)
 
     return
