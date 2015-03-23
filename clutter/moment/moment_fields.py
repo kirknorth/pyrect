@@ -12,6 +12,8 @@ import numpy as np
 from pyart.io import read
 from pyart.config import get_fillvalue, get_field_name
 
+from ..correct import noise
+
 
 def _pickle_histograms(histograms, filename, outdir=None):
     """
@@ -21,10 +23,13 @@ def _pickle_histograms(histograms, filename, outdir=None):
     if outdir is not None:
         filename = os.path.join(outdir, filename)
 
-    # Create dictionary containing all texture fields organized by field name
-    data = {}
-    for histogram in histograms:
-        data[histogram['field']] = histogram
+    # Create dictionary from histogram list
+    if isinstance(histograms, list):
+        data = {histogram['field']: histogram for histogram in histograms}
+    elif isinstance(histograms, dict):
+        data = histograms
+    else:
+        raise ValueError('Unsupported histogram type')
 
     with open(filename, 'wb') as fid:
         pickle.dump(data, fid, protocol=pickle.HIGHEST_PROTOCOL)
@@ -105,7 +110,7 @@ def histogram_from_json(
 
     return {
         'field': field,
-        'histogram': histogram,
+        'histogram counts': histogram,
         'normalized histogram': histogram_norm,
         'probability density': pdf,
         'number of bins': bins,
@@ -119,3 +124,70 @@ def histogram_from_json(
         'sweeps in VCP': vcp_sweeps,
         'rays in VCP': vcp_rays,
         }
+
+
+def histograms_from_radar(
+        radar, hist_dict, gatefilter=None, min_ncp=None, min_sweep=None,
+        max_sweep=None, min_range=None, max_range=None, fill_value=None,
+        ncp_field=None, verbose=False):
+    """
+    """
+
+    # Parse fill value
+    if fill_value is None:
+        fill_value = get_fillvalue()
+
+    # Parse field names
+    if ncp_field is None:
+        ncp_field = get_field_name('normalized_coherent_power')
+
+    # TODO: check input histogram dictionary for proper keys
+
+    # Loop over all fields and compute histogram counts
+    for field in hist_dict:
+
+        # Parse radar fields
+        data = radar.fields[field]['data']
+
+        # Mask sweeps outside specified range
+        if min_sweep is not None:
+            i = radar.sweep_start_ray_index['data'][min_sweep]
+            data[:i+1,:] = np.ma.masked
+        if max_sweep is not None:
+            i = radar.sweep_end_ray_index['data'][max_sweep]
+            data[i+1:,:] = np.ma.masked
+
+        # Mask radar range gates outside specified range
+        if min_range is not None:
+            i = np.abs(radar.range['data'] / 1000.0 - min_range).argmin()
+            data[:,:i+1] = np.ma.masked
+        if max_range is not None:
+            i = np.abs(radar.range['data'] / 1000.0 - max_range).argmin()
+            data[:,i+1:] = np.ma.masked
+
+        # Mask incoherent echoes
+        if min_ncp is not None:
+            ncp = radar.fields[ncp_field]['data']
+            data = np.ma.masked_where(ncp < min_ncp, data)
+
+        # Mask excluded gates
+        if gatefilter is not None:
+            data = np.ma.masked_where(
+                gatefilter.gate_excluded, data)
+
+        # Parse histogram parameters
+        bins = hist_dict[field]['number of bins']
+        limits = hist_dict[field]['limits']
+
+        # Bin data and compute frequencies
+        counts, bin_edges = np.histogram(
+            data.compressed(), bins=bins, range=limits, normed=False,
+            weights=None, density=False)
+        hist_dict[field]['histogram counts'] += counts
+
+        # Parse bin edges and bin centers
+        bin_centers = bin_edges[:-1] + np.diff(bin_edges) / 2.0
+        hist_dict[field]['bin edges'] = bin_edges
+        hist_dict[field]['bin centers'] = bin_centers
+
+    return
