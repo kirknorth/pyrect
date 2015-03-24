@@ -22,6 +22,8 @@ VCP_SWEEPS = 22
 VCP_RAYS = None
 MIN_SWEEP = 2
 MAX_SWEEP = None
+MIN_RANGE = 3.0
+MAX_RANGE = None
 REMOVE_SALT = True
 SALT_WINDOW = (5, 5)
 SALT_SAMPLE = 10
@@ -199,14 +201,15 @@ def _loop_over_dict(json_file, pickle_file, inpdir=None, outdir=None,
             salt_sample=SALT_SAMPLE, fill_value=None, verbose=True)
         gatefilter = noise.significant_detection(
             radar, gatefilter=gatefilter, remove_salt=REMOVE_SALT,
-            salt_window=SALT_WINDOW, salt_sample=SALT_SAMPLE, min_ncp=0.3,
+            salt_window=SALT_WINDOW, salt_sample=SALT_SAMPLE, min_ncp=MIN_NCP,
             detect_field=None, verbose=True)
 
         # Compute histogram counts for each field
         moment_fields.histograms_from_radar(
             radar, HIST_DICT, gatefilter=gatefilter, min_ncp=MIN_NCP,
-            min_sweep=MIN_SWEEP, max_sweep=MAX_SWEEP, fill_value=None,
-            ncp_field=NCP_FIELD, verbose=verbose)
+            min_sweep=MIN_SWEEP, max_sweep=MAX_SWEEP, min_range=MIN_RANGE,
+            max_range=MAX_RANGE, fill_value=None, ncp_field=NCP_FIELD,
+            verbose=verbose)
 
     # Normalize histograms for each field and compute probability densities
     for field in HIST_DICT:
@@ -226,6 +229,8 @@ def _loop_over_dict(json_file, pickle_file, inpdir=None, outdir=None,
         HIST_DICT[field]['radar files'] = files
         HIST_DICT[field]['min sweep'] = MIN_SWEEP
         HIST_DICT[field]['max sweep'] = MAX_SWEEP
+        HIST_DICT[field]['min range'] = MIN_RANGE
+        HIST_DICT[field]['max range'] = MAX_RANGE
         HIST_DICT[field]['sweeps in VCP'] = VCP_SWEEPS
         HIST_DICT[field]['rays in VCP'] = VCP_RAYS
         HIST_DICT[field]['minimum normalized coherent power'] = MIN_NCP
@@ -268,6 +273,8 @@ if __name__ == '__main__':
         print 'VCP_RAYS = {}'.format(VCP_RAYS)
         print 'MIN_SWEEP = {}'.format(MIN_SWEEP)
         print 'MAX_SWEEP = {}'.format(MAX_SWEEP)
+        print 'MIN_RANGE = {} km'.format(MIN_RANGE)
+        print 'MAX_RANGE = {} km'.format(MAX_RANGE)
         print 'REMOVE_SALT = {}'.format(REMOVE_SALT)
         print 'SALT_WINDOW = {}'.format(SALT_WINDOW)
         print 'SALT_SAMPLE = {}'.format(SALT_SAMPLE)

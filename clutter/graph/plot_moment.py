@@ -14,21 +14,21 @@ from pyart.config import get_field_name
 ### GLOBAL VARIABLES ###
 
 # Input directory to moments data
-INPDIR = '/aos/home/kirk/projects/clutter-classification/clutter/calibration'
+INPDIR = '/aos/home/kirk/projects/clutter-classification/clutter/calibration/'
 
 # Pickled moments data
 PRECIP = 'sgpxsaprppiI4.precip.moments.pkl'
 GROUND = 'sgpxsaprppiI4.ground.moments.pkl'
 INSECTS = 'sgpxsaprppiI4.insects.moments.pkl'
 
-
 # Parse field names
-refl_field = get_field_name('reflectivity')
-vdop_field = get_field_name('velocity')
-sw_field = get_field_name('spectrum_width')
-rhv_field = get_field_name('cross_correlation_ratio')
-zdr_field = get_field_name('differential_reflectivity')
-ncp_field = get_field_name('normalized_coherent_power')
+REFL_FIELD = get_field_name('reflectivity')
+VDOP_FIELD = get_field_name('velocity')
+SW_FIELD = get_field_name('spectrum_width')
+RHOHV_FIELD = get_field_name('cross_correlation_ratio')
+ZDR_FIELD = get_field_name('differential_reflectivity')
+NCP_FIELD = get_field_name('normalized_coherent_power')
+PHIDP_FIELD = get_field_name('differential_phase')
 
 ### Set figure parameters ###
 rcParams['axes.linewidth'] = 1.5
@@ -64,24 +64,24 @@ def all_classes(image, outdir=None, dpi=100, verbose=False):
         print 'Insects data: %s' % data_i.keys()
 
     # Parse moments data
-    refl_p = data_p[refl_field]
-    refl_g = data_g[refl_field]
-    refl_i = data_i[refl_field]
-    vdop_p = data_p[vdop_field]
-    vdop_g = data_g[vdop_field]
-    vdop_i = data_i[vdop_field]
-    sw_p = data_p[sw_field]
-    sw_g = data_g[sw_field]
-    sw_i = data_i[sw_field]
-    rhohv_p = data_p[rhv_field]
-    rhohv_g = data_g[rhv_field]
-    rhohv_i = data_i[rhv_field]
-    zdr_p = data_p[zdr_field]
-    zdr_g = data_g[zdr_field]
-    zdr_i = data_i[zdr_field]
-    ncp_p = data_p[ncp_field]
-    ncp_g = data_g[ncp_field]
-    ncp_i = data_i[ncp_field]
+    refl_p = data_p[REFL_FIELD]
+    refl_g = data_g[REFL_FIELD]
+    refl_i = data_i[REFL_FIELD]
+    vdop_p = data_p[VDOP_FIELD]
+    vdop_g = data_g[VDOP_FIELD]
+    vdop_i = data_i[VDOP_FIELD]
+    sw_p = data_p[SW_FIELD]
+    sw_g = data_g[SW_FIELD]
+    sw_i = data_i[SW_FIELD]
+    rhohv_p = data_p[RHOHV_FIELD]
+    rhohv_g = data_g[RHOHV_FIELD]
+    rhohv_i = data_i[RHOHV_FIELD]
+    zdr_p = data_p[ZDR_FIELD]
+    zdr_g = data_g[ZDR_FIELD]
+    zdr_i = data_i[ZDR_FIELD]
+    ncp_p = data_p[NCP_FIELD]
+    ncp_g = data_g[NCP_FIELD]
+    ncp_i = data_i[NCP_FIELD]
 
     fig = plt.figure(figsize=(18, 10))
 
