@@ -180,7 +180,7 @@ def classify(radar, textures=None, moments=None, clutter_map=None,
         P_tot[label] = np.ma.masked_where(
             sample_size < min_inputs, P_tot[label])
 
-    # Mask gates using gate filter
+    # Mask excluded gates from gate filter
     if gatefilter is not None:
         for label in P_tot:
             P_tot[label] = np.ma.masked_where(

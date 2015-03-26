@@ -23,13 +23,13 @@ GROUND = 'sgpxsaprppiI4.ground.textures.pkl'
 INSECTS = 'sgpxsaprppiI4.insects.textures.pkl'
 
 # Parse field names
-refl_field = get_field_name('reflectivity')
-vdop_field = get_field_name('velocity')
-sw_field = get_field_name('spectrum_width')
-rhv_field = get_field_name('cross_correlation_ratio')
-zdr_field = get_field_name('differential_reflectivity')
-phi_field = get_field_name('differential_phase')
-ncp_field = get_field_name('normalized_coherent_power')
+REFL_FIELD = 'reflectivity_texture'
+VDOP_FIELD = 'velocity_texture'
+SW_FIELD = 'spectrum_width_texture'
+RHOHV_FIELD = 'cross_correlation_ratio_texture'
+ZDR_FIELD = 'differential_reflectivity_texture'
+PHIDP_FIELD = 'differential_phase_texture'
+NCP_FIELD = 'normalized_coherent_power_texture'
 
 ### Set figure parameters ###
 rcParams['axes.linewidth'] = 1.5
@@ -65,29 +65,29 @@ def all_classes(image, outdir=None, dpi=100, verbose=False):
         print 'Insects data: %s' % data_i.keys()
 
     # Parse moments data
-    refl_p = data_p[refl_field]
-    refl_g = data_g[refl_field]
-    refl_i = data_i[refl_field]
-    vdop_p = data_p[vdop_field]
-    vdop_g = data_g[vdop_field]
-    vdop_i = data_i[vdop_field]
-    sw_p = data_p[sw_field]
-    sw_g = data_g[sw_field]
-    sw_i = data_i[sw_field]
-    rhohv_p = data_p[rhv_field]
-    rhohv_g = data_g[rhv_field]
-    rhohv_i = data_i[rhv_field]
-    zdr_p = data_p[zdr_field]
-    zdr_g = data_g[zdr_field]
-    zdr_i = data_i[zdr_field]
-    phi_p = data_p[phi_field]
-    phi_g = data_g[phi_field]
-    phi_i = data_i[phi_field]
-    ncp_p = data_p[ncp_field]
-    ncp_g = data_g[ncp_field]
-    ncp_i = data_i[ncp_field]
+    refl_p = data_p[REFL_FIELD]
+    refl_g = data_g[REFL_FIELD]
+    refl_i = data_i[REFL_FIELD]
+    vdop_p = data_p[VDOP_FIELD]
+    vdop_g = data_g[VDOP_FIELD]
+    vdop_i = data_i[VDOP_FIELD]
+    sw_p = data_p[SW_FIELD]
+    sw_g = data_g[SW_FIELD]
+    sw_i = data_i[SW_FIELD]
+    rhohv_p = data_p[RHOHV_FIELD]
+    rhohv_g = data_g[RHOHV_FIELD]
+    rhohv_i = data_i[RHOHV_FIELD]
+    zdr_p = data_p[ZDR_FIELD]
+    zdr_g = data_g[ZDR_FIELD]
+    zdr_i = data_i[ZDR_FIELD]
+    phi_p = data_p[PHIDP_FIELD]
+    phi_g = data_g[PHIDP_FIELD]
+    phi_i = data_i[PHIDP_FIELD]
+    ncp_p = data_p[NCP_FIELD]
+    ncp_g = data_g[NCP_FIELD]
+    ncp_i = data_i[NCP_FIELD]
 
-    fig = plt.figure(figsize=(20, 6))
+    fig = plt.figure(figsize=(20, 10))
 
     # (a) Differential phase texture
     axa = fig.add_subplot(241, xlim=(0, 180), ylim=(0, 1))
@@ -154,31 +154,32 @@ def all_classes(image, outdir=None, dpi=100, verbose=False):
     axd.grid(which='major')
 
     # (e) Doppler velocity texture
-    axe = fig.add_subplot(245, xlim=(0, 15), ylim=(0, 1))
+    axe = fig.add_subplot(245, xlim=(0, 18), ylim=(0, 1))
     axe.plot(vdop_p['bin centers'], vdop_p['normalized histogram'], 'k-',
              linewidth=2, label='Precip')
     axe.plot(vdop_g['bin centers'], vdop_g['normalized histogram'], 'r-',
              linewidth=2, label='Ground')
     axe.plot(vdop_i['bin centers'], vdop_i['normalized histogram'], 'b-',
              linewidth=2, label='Insects')
-    axe.xaxis.set_major_locator(MultipleLocator(3))
+    axe.xaxis.set_major_locator(MultipleLocator(2))
     axe.xaxis.set_minor_locator(MultipleLocator(1))
     axe.yaxis.set_major_locator(MultipleLocator(0.2))
     axe.yaxis.set_major_locator(MultipleLocator(0.1))
     axe.set_xlabel('(m/s)')
+    axe.set_ylabel('Normalized Histogram')
     axe.set_title('Radial velocity texture')
     axe.grid(which='major')
 
     # (f) Spectrum width texture
-    axf = fig.add_subplot(246, xlim=(0, 10), ylim=(0, 1))
+    axf = fig.add_subplot(246, xlim=(0, 5), ylim=(0, 1))
     axf.plot(sw_p['bin centers'], sw_p['normalized histogram'], 'k-',
              linewidth=2, label='Precip')
     axf.plot(sw_g['bin centers'], sw_g['normalized histogram'], 'r-',
              linewidth=2, label='Ground')
     axf.plot(sw_i['bin centers'], sw_i['normalized histogram'], 'b-',
              linewidth=2, label='Insects')
-    axf.xaxis.set_major_locator(MultipleLocator(2))
-    axf.xaxis.set_minor_locator(MultipleLocator(1))
+    axf.xaxis.set_major_locator(MultipleLocator(1))
+    axf.xaxis.set_minor_locator(MultipleLocator(0.5))
     axf.yaxis.set_major_locator(MultipleLocator(0.2))
     axf.yaxis.set_major_locator(MultipleLocator(0.1))
     axf.set_xlabel('(m/s)')
@@ -186,15 +187,15 @@ def all_classes(image, outdir=None, dpi=100, verbose=False):
     axf.grid(which='major')
 
     # (g) Normalized coherent power texture
-    axg = fig.add_subplot(247, xlim=(0, 1), ylim=(0, 1))
+    axg = fig.add_subplot(247, xlim=(0, 0.5), ylim=(0, 1))
     axg.plot(ncp_p['bin centers'], ncp_p['normalized histogram'], 'k-',
              linewidth=2, label='Precip')
     axg.plot(ncp_g['bin centers'], ncp_g['normalized histogram'], 'r-',
              linewidth=2, label='Ground')
     axg.plot(ncp_i['bin centers'], ncp_i['normalized histogram'], 'b-',
              linewidth=2, label='Insects')
-    axg.xaxis.set_major_locator(MultipleLocator(2))
-    axg.xaxis.set_minor_locator(MultipleLocator(1))
+    axg.xaxis.set_major_locator(MultipleLocator(0.1))
+    axg.xaxis.set_minor_locator(MultipleLocator(0.05))
     axg.yaxis.set_major_locator(MultipleLocator(0.2))
     axg.yaxis.set_major_locator(MultipleLocator(0.1))
     axg.set_xlabel('')
@@ -202,7 +203,7 @@ def all_classes(image, outdir=None, dpi=100, verbose=False):
     axg.grid(which='major')
 
     # Add legend
-    axd.legend(loc=[1.05, -0.10])
+    axg.legend(loc=[1.4, 0.40])
 
     # Save figure
     fig.savefig(os.path.join(outdir, image), format='png', dpi=dpi,
@@ -233,5 +234,5 @@ if __name__ == '__main__':
         print 'dpi = %i' % args.dpi
 
     # Call desired plotting function
-    histograms(
+    all_classes(
         args.image, outdir=args.outdir, dpi=args.dpi, verbose=args.verbose)
