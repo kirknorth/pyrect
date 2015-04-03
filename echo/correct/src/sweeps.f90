@@ -1,6 +1,72 @@
 ! Module: sweeps.f90
 
 
+subroutine hildebrand(power, fill_value, nr, ng, P, Q, R2, N)
+
+   implicit none
+
+   integer(kind=4), intent(in)                :: nr, ng
+   real(kind=8), intent(in)                   :: fill_value
+   real(kind=8), intent(in), dimension(nr,ng) :: power
+   real(kind=8), intent(out), dimension(ng)   :: P, Q, R2, N
+
+!  Define local variables ====================================================
+
+   integer(kind=4)           :: g, r
+   logical, dimension(nr,ng) :: valid_power
+   real(kind=8)              :: P_tmp, Q_tmp, R2_tmp, N_tmp
+
+!  ===========================================================================
+
+!  F2PY directives ===========================================================
+
+   !f2py integer(kind=4), optional, intent(in) :: nr, ng
+   !f2py real(kind=8), intent(in)              :: fill_value
+   !f2py real(kind=8), intent(in)              :: power
+   !f2py real(kind=8), intent(out)             :: P, Q, R2, N
+
+!  ===========================================================================
+
+!  Fill mean noise power (P), noise power variance (Q), white noise power (R2)
+!  and sample size of gates determined to be noise (N)
+   P = fill_value
+   Q = fill_value
+   R2 = fill_value
+   N = fill_value
+
+!  Determine where the input power array has valid entries
+   valid_power = power /= fill_value
+
+!  Loop over all radar gates (constant range)
+   do g = 1, ng
+!     Loop over all radar rays
+      do r = 1, nr
+
+!       Compute temporary values
+        N_tmp = dble(count(valid_power(r:nr,g)))
+        P_tmp = sum(power(r:nr,g), valid_power(r:nr,g)) / N_tmp
+        Q_tmp = sum(power(r:nr,g)**2, valid_power(r:nr,g)) / N_tmp - P_tmp**2
+        R2_tmp = P_tmp**2 / Q_tmp
+
+!       If the criteria for white noise has been met, then we have found our
+!       noise floor for the current range and we can save the appropriate
+!       variables and exit the current iteration
+        if (R2_tmp > 1.d0) then
+           P(g) = P_tmp
+           Q(g) = Q_tmp
+           R2(g) = power(r,g)
+           N(g) = N_tmp
+           exit
+        endif
+
+      enddo
+   enddo
+
+   return
+
+end subroutine hildebrand
+
+
 subroutine mean_fill(input, sweep_start, sweep_end, ray_window, gate_window, &
                      min_sample, fill_value, ns, nr, ng)
 

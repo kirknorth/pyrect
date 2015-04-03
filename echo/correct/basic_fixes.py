@@ -6,6 +6,8 @@ clutter.correct.basic_fixes
 
 import numpy as np
 
+from scipy import ndimage
+
 from pyart.config import get_fillvalue, get_field_name
 
 from . import sweeps
@@ -38,7 +40,7 @@ def remove_salt(radar, fields=None, salt_window=(3, 3), salt_sample=5,
     for field in fields:
         # Parse radar data and its original data type
         data = radar.fields[field]['data']
-        dtype = data.dtype
+        dtype_orig = data.dtype
 
         # Prepare data for ingest into Fortran wrapper
         data = np.ma.filled(data, fill_value)
@@ -62,7 +64,7 @@ def remove_salt(radar, fields=None, salt_window=(3, 3), salt_sample=5,
         if mask_data:
             data = np.ma.masked_equal(data, fill_value, copy=False)
 
-        radar.fields[field]['data'] = data.astype(dtype)
+        radar.fields[field]['data'] = data.astype(dtype_orig)
 
     return
 
@@ -110,5 +112,42 @@ def interpolate_missing(radar, fields=None, ray_window=3, gate_window=3,
 
         # Add interpolated data to radar object
         radar.fields[field]['data'] = data
+
+    return
+
+
+def _binary_dilation(radar, field, structure=None, iterations=1):
+    """
+    """
+
+    # Parse radar data
+    mask = radar.fields[field]['data']
+    mask = np.ma.filled(mask, False)
+
+    # Call SciPy's binary fill algorithm
+    mask = ndimage.binary_dilation(
+        mask, structure=structure, iterations=iterations, mask=None,
+        output=None, border_value=0, origin=0, brute_force=False)
+
+    # Update radar field
+    radar.fields[field]['data'] = mask
+
+    return
+
+
+def _binary_fill(radar, field, structure=None):
+    """
+    """
+
+    # Parse radar data
+    mask = radar.fields[field]['data']
+    mask = np.ma.filled(mask, False)
+
+    # Call SciPy's binary fill algorithm
+    mask = ndimage.binary_fill_holes(
+        mask, structure=structure, output=None, origin=0)
+
+    # Update radar field
+    radar.fields[field]['data'] = mask
 
     return

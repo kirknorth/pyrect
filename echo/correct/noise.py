@@ -16,8 +16,9 @@ from ..texture import texture_fields
 
 
 def significant_detection(
-        radar, gatefilter=None, min_ncp=None, remove_salt=True,
-        salt_window=(3, 3), salt_sample=5, rays_wrap_around=False,
+        radar, gatefilter=None, remove_salt=True,
+        salt_window=(3, 3), salt_sample=5, fill_holes=False, dilate=True,
+        structure=None, dilate_iter=1, rays_wrap_around=False, min_ncp=None,
         ncp_field=None, detect_field=None, verbose=False):
     """
     """
@@ -26,7 +27,7 @@ def significant_detection(
     if ncp_field is None:
         ncp_field = get_field_name('normalized_coherent_power')
     if detect_field is None:
-        detect_field = 'significant_detection'
+        detect_field = 'significant_detection_mask'
 
     # Parse gate filter
     if gatefilter is None:
@@ -39,24 +40,126 @@ def significant_detection(
             ~np.logical_or(gatefilter.gate_included, is_coherent), 'and', True)
 
     detect_dict = {
-        'data': gatefilter.gate_included,
-        'long_name': 'Radar significant detection',
-        'standard_name': 'significant_detection',
+        'data': gatefilter.gate_included.astype(np.int8),
+        'long_name': 'Radar significant detection mask',
+        'standard_name': 'significant_detection_mask',
         'valid_min': 0,
         'valid_max': 1,
         '_FillValue': None,
         'units': None,
+        'comment': '0 = not significant, 1 = significant',
     }
     radar.add_field(detect_field, detect_dict, replace_existing=True)
 
+    # Remove salt and pepper noise from significant detection mask
     if remove_salt:
         basic_fixes.remove_salt(
             radar, fields=[detect_field], salt_window=salt_window,
             salt_sample=salt_sample, rays_wrap_around=rays_wrap_around,
-            fill_value=False, mask_data=False, verbose=verbose)
+            fill_value=0, mask_data=False, verbose=verbose)
+
+    # Fill holes in significant detection mask
+    if fill_holes:
+        basic_fixes._binary_fill(radar, detect_field, structure=structure)
+
+    # Dilate significant detection mask
+    if dilate:
+        basic_fixes._binary_dilation(
+            radar, detect_field, structure=structure, iterations=dilate_iter)
 
     # Update gate filter
     gatefilter._merge(~radar.fields[detect_field]['data'], 'new', True)
+
+    return gatefilter
+
+
+def hildebrand_noise(
+        radar, gatefilter=None, scale=1.0, remove_salt=True,
+        salt_window=(5, 5), salt_sample=10, rays_wrap_around=False,
+        fill_value=None, power_field=None, noise_field=None, mask_field=None,
+        verbose=False):
+    """
+    """
+
+    # Parse fill value
+    if fill_value is None:
+        fill_value = get_fillvalue()
+
+    # Parse field names
+    if power_field is None:
+        power_field = get_field_name('signal_to_noise_ratio')
+    if noise_field is None:
+        noise_field = 'radar_noise_floor'
+    if mask_field is None:
+        mask_field = 'radar_noise_floor_mask'
+
+    # Parse radar power data
+    power = radar.fields[power_field]['data']
+
+    # Prepare data for ingest into Fortran wrapper
+    power = np.ma.filled(power, fill_value)
+    power = np.asfortranarray(power, dtype=np.float64)
+
+    # Convert power units to linear and sort in descending order
+    # TODO: check if units are already linear
+    power = np.where(power != fill_value, 10.0**(power / 10.0), power)
+    power = np.sort(power, axis=0, kind='mergesort')[::-1]
+
+    # Fortran wrapper to Hildebrand and Sekhon (1974) algorithm
+    P, Q, R2, N = sweeps.hildebrand(power, fill_value=fill_value)
+
+    # Mask invalid data
+    P = np.ma.masked_equal(P, fill_value)
+    Q = np.ma.masked_equal(Q, fill_value)
+    R2 = np.ma.masked_equal(R2, fill_value)
+    N = np.ma.masked_equal(N, fill_value)
+
+    # Estimate noise floor in decibels and tile to proper dimensions
+    noise = 10.0 * np.ma.log10(P + scale * np.ma.sqrt(Q))
+    noise = np.tile(noise, (radar.nrays, 1))
+    noise.set_fill_value(fill_value)
+
+    # Add Hildebrand noise floor field to radar
+    noise_dict = {
+        'data': noise.astype(np.float32),
+        'long_name': 'Noise floor estimate',
+        'standard_name': 'radar_noise_floor',
+        'units': 'dB',
+        '_FillValue': noise.fill_value,
+        'comment': ('Noise floor is estimated using Hildebrand and '
+                    'Sekhon (1974) algorithm'),
+    }
+    radar.add_field(noise_field, noise_dict, replace_existing=True)
+
+    # Compute noise floor mask and add field to radar
+    power = radar.fields[power_field]['data']
+    noise = radar.fields[noise_field]['data']
+    is_noise = np.ma.filled(power >= noise, False)
+
+    mask_dict = {
+        'data': is_noise.astype(np.int8),
+        'long_name': 'Noise floor mask',
+        'standard_name': 'radar_noise_floor_mask',
+        'valid_min': 0,
+        'valid_max': 1,
+        'units': None,
+        '_FillValue': None,
+        'comment': '0 = below noise floor, 1 = above noise floor',
+    }
+    radar.add_field(mask_field, mask_dict, replace_existing=True)
+
+    if remove_salt:
+        basic_fixes.remove_salt(
+            radar, fields=[mask_field], salt_window=salt_window,
+            salt_sample=salt_sample, rays_wrap_around=rays_wrap_around,
+            fill_value=0, mask_data=False, verbose=verbose)
+
+    # Parse gate filter
+    if gatefilter is None:
+        gatefilter = GateFilter(radar, exclude_based=False)
+    gatefilter._merge(
+        ~np.logical_or(gatefilter.gate_included,
+                       radar.fields[mask_field]['data']), 'and', True)
 
     return gatefilter
 
@@ -66,7 +169,7 @@ def velocity_coherency(
         texture_window=(3, 3), texture_sample=5, min_sigma=None,
         max_sigma=None, nyquist=None, rays_wrap_around=False, remove_salt=True,
         salt_window=(3, 1), salt_sample=5, fill_value=None, vdop_field=None,
-        vdop_text_field=None, verbose=False):
+        vdop_text_field=None, cohere_field=None, verbose=False):
     """
     """
 
@@ -79,6 +182,8 @@ def velocity_coherency(
         vdop_field = get_field_name('velocity')
     if vdop_text_field is None:
         vdop_text_field = '{}_texture'.format(vdop_field)
+    if cohere_field is None:
+        cohere_field = '{}_coherency_mask'.format(vdop_field)
 
     # Parse Nyquist velocity
     if nyquist is None:
@@ -185,36 +290,35 @@ def velocity_coherency(
     mask = np.logical_or(
         radar.fields[vdop_text_field]['data'] <= min_sigma,
         radar.fields[vdop_text_field]['data'] >= max_sigma)
+    mask = np.ma.filled(mask, False)
 
     mask_dict = {
-        'data': mask.astype(np.bool),
-        'long_name': 'Doppler velocity coherency',
-        'standard_name': 'velocity_coherency',
-        'comment': '0 = incoherent velocity, 1 = coherent velocity',
+        'data': mask.astype(np.int8),
+        'long_name': 'Doppler velocity coherency mask',
+        'standard_name': cohere_field,
         'valid_min': 0,
         'valid_max': 1,
         '_FillValue': None,
         'units': None,
+        'comment': '0 = incoherent velocity, 1 = coherent velocity',
     }
-    radar.add_field('velocity_coherency', mask_dict, replace_existing=True)
+    radar.add_field(cohere_field, mask_dict, replace_existing=True)
 
-    # Remove salt and pepper noise from mask
+    # Remove salt and pepper noise from Doppler velocity coherency mask
     if remove_salt:
         basic_fixes.remove_salt(
-            radar, fields=['velocity_coherency'], salt_window=salt_window,
+            radar, fields=[cohere_field], salt_window=salt_window,
             salt_sample=salt_sample, rays_wrap_around=rays_wrap_around,
-            fill_value=0.0, mask_data=False, verbose=verbose)
+            fill_value=0, mask_data=False, verbose=verbose)
 
-        # Parse mask
-        mask = radar.fields['velocity_coherency']['data']
+    # Parse Doppler velocity coherency mask
+    mask = radar.fields[cohere_field]['data']
 
     # Parse gate filter
     if gatefilter is None:
         gatefilter = GateFilter(radar, exclude_based=False)
-        gatefilter._merge(~mask, 'new', True)
-    else:
-        gatefilter._merge(
-            ~np.logical_or(gatefilter.gate_included, mask), 'and', True)
+    gatefilter._merge(
+        ~np.logical_or(gatefilter.gate_included, mask), 'and', True)
 
     return gatefilter
 
@@ -224,7 +328,7 @@ def spectrum_width_coherency(
         texture_window=(3, 3), texture_sample=5, min_sigma=None,
         max_sigma=None, rays_wrap_around=False, remove_salt=True,
         salt_window=(3, 1), salt_sample=5, fill_value=None, width_field=None,
-        width_text_field=None, verbose=False):
+        width_text_field=None, cohere_field=None, verbose=False):
     """
     """
 
@@ -237,6 +341,8 @@ def spectrum_width_coherency(
         width_field = get_field_name('spectrum_width')
     if width_text_field is None:
         width_text_field = '{}_texture'.format(width_field)
+    if cohere_field is None:
+        cohere_field = '{}_coherency_mask'.format(width_field)
 
     # Compute spectrum width texture field
     ray_window, gate_window = texture_window
@@ -330,39 +436,36 @@ def spectrum_width_coherency(
     mask = np.logical_or(
         radar.fields[width_text_field]['data'] <= min_sigma,
         radar.fields[width_text_field]['data'] >= max_sigma)
+    mask = np.ma.filled(mask, False)
 
     mask_dict = {
-        'data': mask.astype(np.bool),
-        'long_name': 'Spectrum width coherency',
-        'standard_name': 'spectrum_width_coherency',
-        'comment': ('0 = incoherent spectrum width, '
-                    '1 = coherent spectrum width'),
+        'data': mask.astype(np.int8),
+        'long_name': 'Spectrum width coherency mask',
+        'standard_name': cohere_field,
         'valid_min': 0,
         'valid_max': 1,
         '_FillValue': None,
         'units': None,
+        'comment': ('0 = incoherent spectrum width, '
+                    '1 = coherent spectrum width'),
     }
-    radar.add_field(
-        'spectrum_width_coherency', mask_dict, replace_existing=True)
+    radar.add_field(cohere_field, mask_dict, replace_existing=True)
 
     # Remove salt and pepper noise from mask
     if remove_salt:
         basic_fixes.remove_salt(
-            radar, fields=['spectrum_width_coherency'],
-            salt_window=salt_window, salt_sample=salt_sample,
-            rays_wrap_around=rays_wrap_around, fill_value=0.0,
-            mask_data=False, verbose=verbose)
+            radar, fields=[cohere_field], salt_window=salt_window,
+            salt_sample=salt_sample, rays_wrap_around=rays_wrap_around,
+            fill_value=0, mask_data=False, verbose=verbose)
 
-        # Parse mask
-        mask = radar.fields['spectrum_width_coherency']['data']
+    # Parse mask
+    mask = radar.fields[cohere_field]['data']
 
     # Parse gate filter
     if gatefilter is None:
         gatefilter = GateFilter(radar, exclude_based=False)
-        gatefilter._merge(~mask, 'new', True)
-    else:
-        gatefilter._merge(
-            ~np.logical_or(gatefilter.gate_included, mask), 'and', True)
+    gatefilter._merge(
+        ~np.logical_or(gatefilter.gate_included, mask), 'and', True)
 
     return gatefilter
 
@@ -372,7 +475,8 @@ def velocity_phasor_coherency(
         texture_window=(3, 3), texture_sample=5, min_sigma=None,
         max_sigma=None, rays_wrap_around=False, remove_salt=True,
         salt_window=(3, 1), salt_sample=5, fill_value=None, vdop_field=None,
-        vdop_phase_field=None, phase_text_field=None, verbose=False):
+        vdop_phase_field=None, phase_text_field=None, cohere_field=None,
+        verbose=False):
     """
     """
 
@@ -387,18 +491,21 @@ def velocity_phasor_coherency(
         vdop_phase_field = '{}_phasor'.format(vdop_field)
     if phase_text_field is None:
         phase_text_field = '{}_texture'.format(vdop_phase_field)
+    if cohere_field is None:
+        cohere_field = '{}_coherency_mask'.format(vdop_phase_field)
 
     # Compute the real part of Doppler velocity phasor
     vdop = radar.fields[vdop_field]['data']
     vdop_phase = np.real(np.exp(1j * np.radians(vdop)))
+    vdop_phase.set_fill_value(fill_value)
 
     # Add Doppler velocity phasor field to radar object
     phasor = {
-        'data': vdop_phase,
-        'long_name': '{} phasor'.format(
-            radar.fields[vdop_field]['long_name']),
-        'standard_name': '{}_phasor'.format(
-            radar.fields[vdop_field]['standard_name']),
+        'data': vdop_phase.astype(np.float32),
+        'long_name': 'Doppler velocity phasor',
+        'standard_name': vdop_phase_field,
+        'valid_min': -1.0,
+        'valid_max': 1.0,
         '_FillValue': vdop_phase.fill_value,
         'units': None,
         'comment': 'Real part of phasor',
@@ -497,39 +604,35 @@ def velocity_phasor_coherency(
     mask = np.logical_or(
         radar.fields[phase_text_field]['data'] <= min_sigma,
         radar.fields[phase_text_field]['data'] >= max_sigma)
+    mask = np.ma.filled(mask, False)
 
     mask_dict = {
-        'data': mask.astype(np.bool),
+        'data': mask.astype(np.int8),
         'long_name': 'Doppler velocity phasor coherency',
-        'standard_name': 'velocity_phasor_coherency',
-        'comment': ('0 = incoherent velocity phasor, '
-                    '1 = coherent velocity phasor'),
+        'standard_name': cohere_field,
         'valid_min': 0,
         'valid_max': 1,
         '_FillValue': None,
         'units': None,
+        'comment': ('0 = incoherent velocity phasor, '
+                    '1 = coherent velocity phasor'),
     }
-    radar.add_field(
-        'velocity_phasor_coherency', mask_dict, replace_existing=True)
+    radar.add_field(cohere_field, mask_dict, replace_existing=True)
 
     # Remove salt and pepper noise from mask
     if remove_salt:
         basic_fixes.remove_salt(
-            radar, fields=['velocity_phasor_coherency'],
-            salt_window=salt_window, salt_sample=salt_sample,
-            rays_wrap_around=rays_wrap_around, fill_value=0.0,
-            mask_data=False, verbose=verbose)
+            radar, fields=[cohere_field], salt_window=salt_window,
+            salt_sample=salt_sample, rays_wrap_around=rays_wrap_around,
+            fill_value=0, mask_data=False, verbose=verbose)
 
-        # Parse mask
-        mask = radar.fields['velocity_phasor_coherency']['data']
-
+    # Parse mask
+    mask = radar.fields[cohere_field]['data']
 
     # Parse gate filter
     if gatefilter is None:
         gatefilter = GateFilter(radar, exclude_based=False)
-        gatefilter._merge(~mask, 'new', True)
-    else:
-        gatefilter._merge(
-            ~np.logical_or(gatefilter.gate_included, mask), 'and', True)
+    gatefilter._merge(
+        ~np.logical_or(gatefilter.gate_included, mask), 'and', True)
 
     return gatefilter
