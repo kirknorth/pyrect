@@ -9,8 +9,8 @@ import numpy as np
 from pyart.io import read
 from pyart.config import get_field_name
 
-from clutter.moment import moment_fields
-from clutter.correct import noise
+from echo.moment import moment_fields
+from echo.correct import noise
 
 
 ### GLOBAL VARIABLES ###
@@ -233,7 +233,7 @@ def _loop_over_dict(json_file, pickle_file, inpdir=None, outdir=None,
         HIST_DICT[field]['max range'] = MAX_RANGE
         HIST_DICT[field]['sweeps in VCP'] = VCP_SWEEPS
         HIST_DICT[field]['rays in VCP'] = VCP_RAYS
-        HIST_DICT[field]['minimum normalized coherent power'] = MIN_NCP
+        HIST_DICT[field]['min NCP'] = MIN_NCP
 
     # Pickle histogram data
     moment_fields._pickle_histograms(

@@ -20,6 +20,11 @@ VCP_SWEEPS = 22
 # Define sweeps to be plotted
 SWEEPS = [0, 1, 2, 3, 4, 5, 6, 8, 10, 12, 14, 16, 18, 20, 21]
 
+# Define color map
+CMAP = plt.get_cmap('jet')
+NORM = BoundaryNorm(np.arange(0, 1.1, 0.1), CMAP.N)
+TICKS = np.arange(0, 1.1, 0.1)
+
 ### Set figure parameters ###
 rcParams['axes.linewidth'] = 1.5
 rcParams['xtick.major.size'] = 4
@@ -30,11 +35,6 @@ rcParams['ytick.major.size'] = 4
 rcParams['ytick.major.width'] = 1
 rcParams['ytick.minor.size'] = 2
 rcParams['ytick.minor.width'] = 1
-
-# Define color map
-cmap = plt.get_cmap('jet')
-norm = BoundaryNorm(np.arange(0, 1.1, 0.1), cmap.N)
-ticks = np.arange(0, 1.1, 0.1)
 
 
 def _pcolormesh(radar, field, sweep=0, cmap=None, norm=None, ax=None):
@@ -66,16 +66,16 @@ def _pcolormesh(radar, field, sweep=0, cmap=None, norm=None, ax=None):
     return qm
 
 
-def multipanel(filename, outdir, inpdir=None, dpi=50, verbose=False):
+def multipanel(pickle_file, outdir, inpdir=None, dpi=50, verbose=False):
     """
     """
 
     # Parse input directory
     if inpdir is not None:
-        filename = os.path.join(inpdir, filename)
+        pickle_file = os.path.join(inpdir, pickle_file)
 
     # Read pickled data
-    with open(filename, 'rb') as fid:
+    with open(pickle_file, 'rb') as fid:
         data = pickle.load(fid)
 
     # Parse radar data
@@ -85,40 +85,41 @@ def multipanel(filename, outdir, inpdir=None, dpi=50, verbose=False):
         return
 
     if verbose:
-        print 'Currently plotting file %s' % os.path.basename(filename)
+        print 'Currently plotting file %s' % os.path.basename(pickle_file)
 
     # Create figure instance
     subs = {'xlim': (-40, 40), 'ylim': (-40, 40)}
     figs = {'figsize': (52, 26)}
-    fig, axes = plt.subplots(nrows=3, ncols=5, subplot_kw=subs, **figs)
+    fig, ax = plt.subplots(nrows=3, ncols=5, subplot_kw=subs, **figs)
+    ax = ax.flatten()
 
     # Iterate over each sweep
-    for k, ax in zip(SWEEPS, axes.flatten()):
+    for k, sweep in enumerate(SWEEPS):
 
-        qm = _pcolormesh(radar, 'clutter_frequency_map', sweep=k, cmap=cmap,
-                         norm=norm, ax=ax)
+        qm = _pcolormesh(
+            radar, 'clutter_map', sweep=sweep, cmap=CMAP, norm=NORM, ax=ax[k])
 
     # Format plot axes
-    for ax in axes.flatten():
-        ax.xaxis.set_major_locator(MultipleLocator(10))
-        ax.xaxis.set_minor_locator(MultipleLocator(5))
-        ax.yaxis.set_major_locator(MultipleLocator(10))
-        ax.yaxis.set_minor_locator(MultipleLocator(5))
-        ax.set_xlabel('Eastward Range from Radar (km)', fontsize=18)
-        ax.set_ylabel('Northward Range from Radar (km)', fontsize=18)
-        ax.grid(which='major')
+    for i in range(ax.size):
+        ax[i].xaxis.set_major_locator(MultipleLocator(10))
+        ax[i].xaxis.set_minor_locator(MultipleLocator(5))
+        ax[i].yaxis.set_major_locator(MultipleLocator(10))
+        ax[i].yaxis.set_minor_locator(MultipleLocator(5))
+        ax[i].set_xlabel('Eastward Range from Radar (km)', fontsize=18)
+        ax[i].set_ylabel('Northward Range from Radar (km)', fontsize=18)
+        ax[i].grid(which='major')
 
     # Color bars
     cax = fig.add_axes([0.44, 0.05, 0.15, 0.01])
-    cb = plt.colorbar(mappable=qm, cax=cax, extend='neither', ticks=ticks,
+    cb = plt.colorbar(mappable=qm, cax=cax, extend='neither', ticks=TICKS,
                       orientation='horizontal')
-    cb.ax.set_ylabel('Prob.', rotation='horizontal', fontsize=24)
+    cb.ax.set_ylabel('Prob.', rotation='horizontal', fontsize=22)
     cb.ax.yaxis.set_label_coords(1.07, 0.00)
 
     # Save figure
-    fname, fext = os.path.splitext(filename)
-    fname = '{}.png'.format(os.path.basename(fname))
-    fig.savefig(os.path.join(outdir, fname), format='png', dpi=dpi,
+    filename, ext = os.path.splitext(pickle_file)
+    filename = '{}.png'.format(os.path.basename(filename))
+    fig.savefig(os.path.join(outdir, filename), format='png', dpi=dpi,
                 bbox_inches='tight')
     plt.close(fig)
 
@@ -129,9 +130,9 @@ if __name__ == '__main__':
 
     # Parse command line arguments
     parser = argparse.ArgumentParser(description=None)
-    parser.add_argument('filename', type=str, help=None)
+    parser.add_argument('pickle', type=str, help=None)
     parser.add_argument('outdir', type=str, help=None)
-    parser.add_argument('-inpdir', nargs='?', type=str, const=None,
+    parser.add_argument('--inpdir', nargs='?', type=str, const=None,
                         default=None, help=None)
     parser.add_argument('--dpi', nargs='?', type=int, const=50, default=50,
                         help=None)
@@ -142,13 +143,13 @@ if __name__ == '__main__':
     args = parser.parse_args()
 
     if args.debug:
-        print 'filename = %s' % args.filename
-        print 'outdir = %s' % args.outdir
-        print 'inpdir = %s' % args.inpdir
-        print 'dpi = %i' % args.dpi
+        print 'pickle = {}'.format(args.pickle)
+        print 'outdir = {}'.format(args.outdir)
+        print 'inpdir = {}'.format(args.inpdir)
+        print 'dpi = {}'.format(args.dpi)
 
     # Call desired plotting function
-    multipanel(args.filename, args.outdir, inpdir=args.inpdir, dpi=args.dpi,
+    multipanel(args.pickle, args.outdir, inpdir=args.inpdir, dpi=args.dpi,
                verbose=args.verbose)
 
 

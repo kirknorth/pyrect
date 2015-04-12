@@ -42,7 +42,7 @@ def _pickle_histograms(histograms, filename, outdir=None):
 def _compute_field(radar, field, gatefilter=None, ray_window=3, gate_window=3,
                    min_sample=5, min_ncp=None, min_sweep=None, max_sweep=None,
                    min_range=None, max_range=None, rays_wrap_around=False,
-                   fill_value=None, ncp_field=None):
+                   fill_value=None, text_field=None, ncp_field=None):
     """
     Compute the texture (standard deviation) within the 2-D window for the
     specified field.
@@ -62,6 +62,8 @@ def _compute_field(radar, field, gatefilter=None, ray_window=3, gate_window=3,
         fill_value = get_fillvalue()
 
     # Parse field names
+    if text_field is None:
+        text_field = '{}_texture'.format(field)
     if ncp_field is None:
         ncp_field = get_field_name('normalized_coherent_power')
 
@@ -117,22 +119,21 @@ def _compute_field(radar, field, gatefilter=None, ray_window=3, gate_window=3,
     # Mask invalid values
     texture = np.ma.masked_equal(texture, fill_value, copy=False)
     texture = np.ma.masked_invalid(texture, copy=False)
+    texture.set_fill_value(fill_value)
 
+    # Create texture field dictionary and add it to the radar object
     texture = {
-        'data': texture,
-        'standard_name': '{}_texture'.format(
-            radar.fields[field]['standard_name']),
+        'data': texture.astype(np.float32),
         'long_name': '{} texture'.format(radar.fields[field]['long_name']),
+        'standard_name': text_field,
+        'valid_min': 0.0,
         '_FillValue': texture.fill_value,
         'units': radar.fields[field]['units'],
-        'valid_min': 0.0,
-        'valid_max': texture.max(),
         'comment_1': ('Texture field is defined as the standard deviation '
-                    'of a field within a prescribed window'),
-        'comment_2': 'Window size was {} x {}'.format(gate_window, ray_window),
+                      'within a prescribed 2D window'),
+        'comment_2': '{} x {} window'.format(gate_window, ray_window),
     }
-
-    radar.add_field('{}_texture'.format(field), texture, replace_existing=True)
+    radar.add_field(text_field, texture, replace_existing=True)
 
     return
 
@@ -165,7 +166,7 @@ def add_textures(radar, fields=None, gatefilter=None, texture_window=(3, 3),
             min_ncp=min_ncp, min_sweep=min_sweep, max_sweep=max_sweep,
             min_range=min_range, max_range=max_range,
             rays_wrap_around=rays_wrap_around, fill_value=fill_value,
-            ncp_field=ncp_field)
+            text_field=None, ncp_field=ncp_field)
 
     return
 
