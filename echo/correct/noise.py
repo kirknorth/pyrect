@@ -34,10 +34,8 @@ def significant_detection(
         gatefilter = GateFilter(radar, exclude_based=False)
 
     # Coherent power criteria
-    if min_ncp is not None:
-        is_coherent = radar.fields[ncp_field]['data'] >= min_ncp
-        gatefilter._merge(
-            ~np.logical_or(gatefilter.gate_included, is_coherent), 'and', True)
+    if min_ncp is not None and ncp_field in radar.fields:
+        gatefilter.include_above(ncp_field, min_ncp, op='and')
 
     detect_dict = {
         'data': gatefilter.gate_included.astype(np.int8),
@@ -46,7 +44,7 @@ def significant_detection(
         'valid_min': 0,
         'valid_max': 1,
         '_FillValue': None,
-        'units': None,
+        'units': 'unitless',
         'comment': '0 = not significant, 1 = significant',
     }
     radar.add_field(detect_field, detect_dict, replace_existing=True)
@@ -68,7 +66,7 @@ def significant_detection(
             radar, detect_field, structure=structure, iterations=dilate_iter)
 
     # Update gate filter
-    gatefilter._merge(~radar.fields[detect_field]['data'], 'new', True)
+    gatefilter.include_equal(detect_field, 1, op='new')
 
     return gatefilter
 
@@ -122,8 +120,8 @@ def hildebrand_noise(
     # Add Hildebrand noise floor field to radar
     noise_dict = {
         'data': noise.astype(np.float32),
-        'long_name': 'Noise floor estimate',
-        'standard_name': 'radar_noise_floor',
+        'long_name': 'Radar noise floor estimate',
+        'standard_name': noise_field,
         'units': 'dB',
         '_FillValue': noise.fill_value,
         'comment': ('Noise floor is estimated using Hildebrand and '
@@ -139,10 +137,10 @@ def hildebrand_noise(
     mask_dict = {
         'data': is_noise.astype(np.int8),
         'long_name': 'Noise floor mask',
-        'standard_name': 'radar_noise_floor_mask',
+        'standard_name': mask_field,
         'valid_min': 0,
         'valid_max': 1,
-        'units': None,
+        'units': 'unitless',
         '_FillValue': None,
         'comment': '0 = below noise floor, 1 = above noise floor',
     }
@@ -157,9 +155,9 @@ def hildebrand_noise(
     # Parse gate filter
     if gatefilter is None:
         gatefilter = GateFilter(radar, exclude_based=False)
-    gatefilter._merge(
-        ~np.logical_or(gatefilter.gate_included,
-                       radar.fields[mask_field]['data']), 'and', True)
+
+    # Update gate filter
+    gatefilter.include_equal(mask_field, 1, op='and')
 
     return gatefilter
 
@@ -199,7 +197,7 @@ def velocity_coherency(
         min_sample=texture_sample, min_ncp=None, min_sweep=None,
         max_sweep=None, fill_value=fill_value, ncp_field=None)
 
-    # Find edges of noise curve
+    # Find edges of noise distribution
     if min_sigma is None and max_sigma is None:
 
         # Compute Doppler velocity texture frequency counts
@@ -216,7 +214,7 @@ def velocity_coherency(
         if verbose:
             print 'Bin width = %.2f m/s' % width
 
-        # Determine distribution extrema locations
+        # Determine Doppler velocity texture distribution extrema locations
         k_min = argrelextrema(
             hist, np.less, axis=0, order=1, mode='clip')[0]
         k_max = argrelextrema(
@@ -226,15 +224,16 @@ def velocity_coherency(
             print 'Minima located at %s m/s' % bins[k_min]
             print 'Maxima located at %s m/s' % bins[k_max]
 
-        #  Definitive clear air volume with no velocity aliasing
+        #  Case 1: Definitive clear air volume with no velocity aliasing
         if k_min.size <= 1 or k_max.size <= 1:
 
             # Bracket noise distribution
-            # Add (left side) or subtract (right side) the half bin width to
-            # account for the bin width
+            # Add (to the left side) or subtract (to the right side) the half
+            # bin width to account for the bin width
             max_sigma = nyquist
 
-            # Account for the no coherent signal case
+            # Case 1.1: No coherent signal in the Doppler velocity texture
+            # distribution
             if k_min.size == 0:
                 min_sigma = bins.min() - half_width
             else:
@@ -245,38 +244,55 @@ def velocity_coherency(
                 print 'Computed max_sigma = %.2f m/s' % max_sigma
                 print 'Radar volume is a clear air volume'
 
-        # Typical volume containing sufficient scatterers (e.g., hydrometeors,
-        # insects, etc.)
+        # Case 2: Typical radar volume containing sufficient scatterers (e.g.,
+        # hydrometeors, insects, etc.)
         # Velocity aliasing may or may not be present
         else:
 
             # Compute primary and secondary peak locations
+            # One of these peaks defines the noise distribution
             hist_max = np.sort(hist[k_max], kind='mergesort')[::-1]
             prm_peak = bins[np.abs(hist - hist_max[0]).argmin()]
             sec_peak = bins[np.abs(hist - hist_max[1]).argmin()]
+            peaks = np.array([prm_peak, sec_peak], dtype=np.float64)
 
             if verbose:
                 print 'Primary peak located at %.2f m/s' % prm_peak
                 print 'Secondary peak located at %.2f m/s' % sec_peak
 
-            # If the primary (secondary) peak velocity texture is greater than
-            # the secondary (primary) peak velocity texture, than the primary
-            # (secondary) peak defines the noise distribution
-            noise_peak = np.max([prm_peak, sec_peak])
+            # The noise distribution will typically be defined as the largest
+            # (in terms of Doppler velocity) of the primary and secondary
+            # peaks, e.g., if the primary (secondary) peak velocity texture is
+            # greater than the secondary (primary) peak velocity texture, than
+            # the primary (secondary) peak defines the noise distribution
+            # However in rare circumstances where the velocity aliasing signal
+            # is very strong, this will not be the case
+            # The most general way to determe which peak is the noise peak is
+            # to use basic Guassian noise theory, which predicts that the noise
+            # peak (mean) is a function of Nyquist velocity
+            idx = np.abs(peaks - 2.0 * nyquist / np.sqrt(12.0)).argmin()
+            noise_peak_theory = peaks[idx]
+            noise_peak = np.max(peaks)
+
+            # Case 2.1: Strong velocity aliasing signal
+            if noise_peak != noise_peak_theory:
+                noise_peak = noise_peak_theory
+                if verbose:
+                    print 'Strong velocity aliasing signal'
 
             if verbose:
                 print 'Noise peak located at %.2f m/s' % noise_peak
 
-            # Determine left/right sides of noise distribution
+            # Determine left and right sides of noise distribution
             left_side = bins[k_min] < noise_peak
             right_side = bins[k_min] > noise_peak
 
             # Bracket noise distribution
-            # Add (left side) or subtract (right side) the half bin width to
-            # account for the bin width
+            # Add (to the left side) or subtract (to the right side) the half
+            # bin width to account for the bin width
             min_sigma = bins[k_min][left_side].max() + half_width
 
-            # Account for the no aliasing case
+            # Case 2.2: No velocity aliasing signal
             if any(right_side):
                 max_sigma = bins[k_min][right_side].min() - half_width
             else:
@@ -299,7 +315,7 @@ def velocity_coherency(
         'valid_min': 0,
         'valid_max': 1,
         '_FillValue': None,
-        'units': None,
+        'units': 'unitless',
         'comment': '0 = incoherent velocity, 1 = coherent velocity',
     }
     radar.add_field(cohere_field, mask_dict, replace_existing=True)
@@ -311,14 +327,12 @@ def velocity_coherency(
             salt_sample=salt_sample, rays_wrap_around=rays_wrap_around,
             fill_value=0, mask_data=False, verbose=verbose)
 
-    # Parse Doppler velocity coherency mask
-    mask = radar.fields[cohere_field]['data']
-
     # Parse gate filter
     if gatefilter is None:
         gatefilter = GateFilter(radar, exclude_based=False)
-    gatefilter._merge(
-        ~np.logical_or(gatefilter.gate_included, mask), 'and', True)
+
+    # Update gate filter
+    gatefilter.include_equal(cohere_field, 1, op='and')
 
     return gatefilter
 
@@ -445,7 +459,7 @@ def spectrum_width_coherency(
         'valid_min': 0,
         'valid_max': 1,
         '_FillValue': None,
-        'units': None,
+        'units': 'unitless',
         'comment': ('0 = incoherent spectrum width, '
                     '1 = coherent spectrum width'),
     }
@@ -458,14 +472,12 @@ def spectrum_width_coherency(
             salt_sample=salt_sample, rays_wrap_around=rays_wrap_around,
             fill_value=0, mask_data=False, verbose=verbose)
 
-    # Parse mask
-    mask = radar.fields[cohere_field]['data']
-
     # Parse gate filter
     if gatefilter is None:
         gatefilter = GateFilter(radar, exclude_based=False)
-    gatefilter._merge(
-        ~np.logical_or(gatefilter.gate_included, mask), 'and', True)
+
+    # Update gate filter
+    gatefilter.include_equal(cohere_field, 1, op='and')
 
     return gatefilter
 
@@ -507,7 +519,7 @@ def velocity_phasor_coherency(
         'valid_min': -1.0,
         'valid_max': 1.0,
         '_FillValue': vdop_phase.fill_value,
-        'units': None,
+        'units': 'unitless',
         'comment': 'Real part of phasor',
     }
     radar.add_field(vdop_phase_field, phasor, replace_existing=True)
@@ -613,7 +625,7 @@ def velocity_phasor_coherency(
         'valid_min': 0,
         'valid_max': 1,
         '_FillValue': None,
-        'units': None,
+        'units': 'unitless',
         'comment': ('0 = incoherent velocity phasor, '
                     '1 = coherent velocity phasor'),
     }
@@ -626,13 +638,11 @@ def velocity_phasor_coherency(
             salt_sample=salt_sample, rays_wrap_around=rays_wrap_around,
             fill_value=0, mask_data=False, verbose=verbose)
 
-    # Parse mask
-    mask = radar.fields[cohere_field]['data']
-
     # Parse gate filter
     if gatefilter is None:
         gatefilter = GateFilter(radar, exclude_based=False)
-    gatefilter._merge(
-        ~np.logical_or(gatefilter.gate_included, mask), 'and', True)
+
+    # Update gate filter
+    gatefilter.include_equal(cohere_field, 1, op='and')
 
     return gatefilter
