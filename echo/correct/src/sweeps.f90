@@ -68,7 +68,7 @@ end subroutine hildebrand
 
 
 subroutine mean_fill(input, sweep_start, sweep_end, ray_window, gate_window, &
-                     min_sample, fill_value, ns, nr, ng)
+                     min_sample, rays_wrap, fill_value, ns, nr, ng)
 
    implicit none
 
@@ -77,6 +77,7 @@ subroutine mean_fill(input, sweep_start, sweep_end, ray_window, gate_window, &
    integer(kind=4), intent(in)                   :: ray_window, gate_window
    integer(kind=4), intent(in)                   :: min_sample
    real(kind=8), intent(in)                      :: fill_value
+   logical, intent(in)                           :: rays_wrap
    real(kind=8), intent(inout), dimension(nr,ng) :: input
 
 
@@ -84,8 +85,8 @@ subroutine mean_fill(input, sweep_start, sweep_end, ray_window, gate_window, &
 !  Define local variables =====================================================
 
    logical, dimension(nr,ng) :: is_valid
-   integer(kind=4)            :: N_tmp
-   integer(kind=4)            :: r, g, s, r0, rn, g0, gn, s0, sn
+   integer(kind=4)           :: N_tmp
+   integer(kind=4)           :: r, g, s, r0, rn, g0, gn, s0, sn
 
 !  ============================================================================
 
@@ -94,7 +95,7 @@ subroutine mean_fill(input, sweep_start, sweep_end, ray_window, gate_window, &
 
 !  ============================================================================
 
-!  Create boolean arrays
+!  Determine which gates are not missing
    is_valid = input /= fill_value
 
 !  Loop over all gates

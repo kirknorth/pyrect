@@ -1,24 +1,25 @@
 """
-clutter.correct.noise
-=====================
+echo.correct.noise
+==================
 
 """
 
 import numpy as np
 
+from scipy import ndimage
 from scipy.signal import argrelextrema
 
 from pyart.correct import GateFilter
-from pyart.config import get_fillvalue, get_field_name
+from pyart.config import get_fillvalue, get_field_name, get_metadata
 
 from . import sweeps, basic_fixes
 from ..texture import texture_fields
 
 
 def significant_detection(
-        radar, gatefilter=None, remove_salt=True,
-        salt_window=(3, 3), salt_sample=5, fill_holes=False, dilate=True,
-        structure=None, dilate_iter=1, rays_wrap_around=False, min_ncp=None,
+        radar, gatefilter=None, remove_salt=True, salt_window=(5, 5),
+        salt_sample=10, fill_holes=False, dilate=True, structure=None,
+        dilate_iter=1, rays_wrap_around=False, min_ncp=None,
         ncp_field=None, detect_field=None, verbose=False):
     """
     """
@@ -165,9 +166,10 @@ def hildebrand_noise(
 def velocity_coherency(
         radar, gatefilter=None, num_bins=10, limits=None,
         texture_window=(3, 3), texture_sample=5, min_sigma=None,
-        max_sigma=None, nyquist=None, rays_wrap_around=False, remove_salt=True,
-        salt_window=(3, 1), salt_sample=5, fill_value=None, vdop_field=None,
-        vdop_text_field=None, cohere_field=None, verbose=False):
+        max_sigma=None, nyquist=None, rays_wrap_around=False,
+        remove_salt=False, salt_window=(5, 5), salt_sample=10, fill_value=None,
+        vdop_field=None, vdop_text_field=None, cohere_field=None,
+        verbose=False):
     """
     """
 
@@ -340,8 +342,8 @@ def velocity_coherency(
 def spectrum_width_coherency(
         radar, gatefilter=None, num_bins=10, limits=None,
         texture_window=(3, 3), texture_sample=5, min_sigma=None,
-        max_sigma=None, rays_wrap_around=False, remove_salt=True,
-        salt_window=(3, 1), salt_sample=5, fill_value=None, width_field=None,
+        max_sigma=None, rays_wrap_around=False, remove_salt=False,
+        salt_window=(5, 5), salt_sample=10, fill_value=None, width_field=None,
         width_text_field=None, cohere_field=None, verbose=False):
     """
     """
@@ -485,8 +487,8 @@ def spectrum_width_coherency(
 def velocity_phasor_coherency(
         radar, gatefilter=None, num_bins=10, limits=None,
         texture_window=(3, 3), texture_sample=5, min_sigma=None,
-        max_sigma=None, rays_wrap_around=False, remove_salt=True,
-        salt_window=(3, 1), salt_sample=5, fill_value=None, vdop_field=None,
+        max_sigma=None, rays_wrap_around=False, remove_salt=False,
+        salt_window=(5, 5), salt_sample=10, fill_value=None, vdop_field=None,
         vdop_phase_field=None, phase_text_field=None, cohere_field=None,
         verbose=False):
     """
@@ -644,5 +646,94 @@ def velocity_phasor_coherency(
 
     # Update gate filter
     gatefilter.include_equal(cohere_field, 1, op='and')
+
+    return gatefilter
+
+
+def _significant_features(
+        radar, field, gatefilter=None, num_bins=100, limits=(0, 100),
+        structure=None, fill_value=None, size_field=None, debug=False):
+    """
+    """
+
+    # Parse field names
+    if size_field is None:
+        size_field = '{}_feature_size'.format(field)
+
+    # Parse gate filter
+    if gatefilter is None:
+        gatefilter = GateFilter(radar, exclude_based=False)
+
+    # Parse binary structuring element
+    if structure is None:
+        structure = ndimage.generate_binary_structure(2, 1)
+
+    # Initialize echo feature size field
+    radar.fields[size_field] = get_metadata(size_field)
+    radar.fields[size_field]['data'] = np.zeros_like(
+        radar.fields[field]['data'])
+
+    # Loop over all sweeps
+    feature_sizes = []
+    for sweep in radar.iter_slice():
+
+        # Parse radar sweep data and define only valid gates
+        is_valid_gate = ~radar.fields[field]['data'][sweep].mask
+
+        # Label radar sweep data and create index array which defines each
+        # unique label
+        labels, nlabels = ndimage.label(
+            is_valid_gate, structure=structure, output=None)
+        index = np.arange(1, nlabels + 1, 1)
+
+        if debug:
+            print 'Number of unique features for {}: {}'.format(sweep, nlabels)
+
+        # Compute the size (in radar gates) of each echo feature
+        sweep_sizes = ndimage.labeled_comprehension(
+            is_valid_gate, labels, index, np.sum, np.int32, 0)
+
+        # Append sweep echo feature sizes
+        feature_sizes.append(sweep_sizes)
+
+        # Set each label to its total size (in radar gates)
+        for label, size in zip(index, sweep_sizes):
+            is_label = labels == label
+            radar.fields[size_field]['data'][sweep][is_label] = size
+
+    # Stack sweep echo feature sizes
+    feature_sizes = np.hstack(feature_sizes)
+
+    # Compute histogram of echo feature sizes, bin centers and bin
+    # width
+    counts, bin_edges = np.histogram(
+        feature_sizes, bins=num_bins, range=limits, normed=False,
+        weights=None, density=False)
+    bin_centers = bin_edges[:-1] + np.diff(bin_edges) / 2.0
+    bin_width = np.diff(bin_edges).mean()
+
+    if debug:
+        print 'Bin width: {} gate(s)'.format(bin_width)
+
+    # Compute the peak of the echo feature size distribution
+    # We expect the peak of the echo feature size distribution to be close to 1
+    # radar gate
+    idx = np.abs(counts - counts.max()).argmin()
+    peak_size = bin_centers[idx] - bin_width / 2.0
+
+    if debug:
+        print 'Echo feature size at peak: {} gate(s)'.format(peak_size)
+
+    # Determine the first instance when the echo feature size reaches 0 radar
+    # gates after the distribution peak
+    # This will define the minimum echo feature size
+    is_zero_size = np.logical_and(bin_centers > peak_size, counts == 0)
+    min_size = bin_centers[is_zero_size].min() - bin_width / 2.0
+
+    if debug:
+        print 'Minimum echo feature size: {} gates'.format(min_size)
+
+    # Update gate filter
+    gatefilter.include_above(size_field, min_size, op='and', inclusive=False)
 
     return gatefilter
