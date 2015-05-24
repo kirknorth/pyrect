@@ -17,11 +17,63 @@ from ..texture import texture_fields
 
 
 def significant_detection(
-        radar, gatefilter=None, remove_salt=True, salt_window=(5, 5),
-        salt_sample=10, fill_holes=False, dilate=True, structure=None,
-        dilate_iter=1, rays_wrap_around=False, min_ncp=None,
-        ncp_field=None, detect_field=None, verbose=False):
+        radar, gatefilter=None, remove_small_features=True, size_bins=75,
+        size_limits=(0, 300), fill_holes=False, dilate=False, structure=None,
+        iterations=1, rays_wrap_around=False, min_ncp=None, ncp_field=None,
+        detect_field=None, debug=False, verbose=False):
     """
+    Determine the significant detection of a radar. Note that significant
+    detection can still include other non-meteorological echoes that the user
+    may still have to remove further down the processing chain.
+
+    Parameters
+    ----------
+    radar : Radar
+        Radar object used to determine the appropriate GateFilter.
+    gatefilter : GateFilter, optional
+        If None, all radar gates will initially be assumed valid.
+    remove_small_features : bool, optional
+        True to remove insignificant echo features (e.g., salt and pepper
+        noise) from significant detection mask.
+    size_bins : int, optional
+        Number of bins used to bin echo feature sizes and thus define its
+        distribution.
+    size_limits : list or tuple, optional
+        Limits of the echo feature size distribution. The upper limit needs to
+        be large enough to include the minimum feature size.
+    fill_holes : bool, optional
+        Fill any holes in the significant detection mask. For most radar
+        volumes this should not be used since the default structuring element
+        will automatically fill any sized hole.
+    dilate : bool, optional
+        Use binary dilation to fill in edges of the significant detection mask.
+    structure : array_like, optional
+        The binary structuring element used for all morphology routines. See
+        SciPy's ndimage documentation for more information.
+    iterations : int, optional
+        The number of iterations to repeat binary dilation. If iterations is
+        less than 1, binary dilation is repeated until the result does not
+        change anymore.
+    rays_wrap_around : bool, optional
+        Whether the rays at the beginning and end of a sweep are connected
+        (e.g., PPI VCP).
+    min_ncp : float, optional
+        Minimum normalized coherent power (signal quality) value used to
+        indicate a significant echo. This criteria is not used by default.
+    ncp_field : str, optional
+        Minimum normalized coherent power (signal quality) field name. The
+        default uses the Py-ART configuation file.
+    detect_field : str, optional
+        Radar significant detection mask field name.
+    debug : bool, optional
+        True to print debugging information, False to suppress.
+    verbose : bool, optional
+        True to print progress information, False to suppress.
+
+    Returns
+    -------
+    gatefilter : GateFilter
+        Indicates which radar gates are valid and invalid.
     """
 
     # Parse field names
@@ -34,9 +86,9 @@ def significant_detection(
     if gatefilter is None:
         gatefilter = GateFilter(radar, exclude_based=False)
 
-    # Coherent power criteria
+    # Exclude gates with poor signal quality
     if min_ncp is not None and ncp_field in radar.fields:
-        gatefilter.include_above(ncp_field, min_ncp, op='and')
+        gatefilter.include_above(ncp_field, min_ncp, op='and', inclusive=True)
 
     detect_dict = {
         'data': gatefilter.gate_included.astype(np.int8),
@@ -46,16 +98,15 @@ def significant_detection(
         'valid_max': 1,
         '_FillValue': None,
         'units': 'unitless',
-        'comment': '0 = not significant, 1 = significant',
+        'comment': '0 = no significant detection, 1 = significant detection',
     }
     radar.add_field(detect_field, detect_dict, replace_existing=True)
 
-    # Remove salt and pepper noise from significant detection mask
-    if remove_salt:
-        basic_fixes.remove_salt(
-            radar, fields=[detect_field], salt_window=salt_window,
-            salt_sample=salt_sample, rays_wrap_around=rays_wrap_around,
-            fill_value=0, mask_data=False, verbose=verbose)
+    # Remove insignificant features from significant detection mask
+    if remove_small_features:
+        basic_fixes._binary_significant_features(
+            radar, detect_field, size_bins=size_bins, size_limits=size_limits,
+            structure=structure, debug=debug, verbose=verbose)
 
     # Fill holes in significant detection mask
     if fill_holes:
@@ -64,7 +115,8 @@ def significant_detection(
     # Dilate significant detection mask
     if dilate:
         basic_fixes._binary_dilation(
-            radar, detect_field, structure=structure, iterations=dilate_iter)
+            radar, detect_field, structure=structure, iterations=iterations,
+            debug=debug, verbose=verbose)
 
     # Update gate filter
     gatefilter.include_equal(detect_field, 1, op='new')
@@ -73,8 +125,8 @@ def significant_detection(
 
 
 def hildebrand_noise(
-        radar, gatefilter=None, scale=1.0, remove_salt=True,
-        salt_window=(5, 5), salt_sample=10, rays_wrap_around=False,
+        radar, gatefilter=None, scale=1.0, remove_small_features=False,
+        size_bins=75, size_limits=(0, 300), rays_wrap_around=False,
         fill_value=None, power_field=None, noise_field=None, mask_field=None,
         verbose=False):
     """
@@ -130,11 +182,12 @@ def hildebrand_noise(
     }
     radar.add_field(noise_field, noise_dict, replace_existing=True)
 
-    # Compute noise floor mask and add field to radar
+    # Compute noise floor mask
     power = radar.fields[power_field]['data']
     noise = radar.fields[noise_field]['data']
     is_noise = np.ma.filled(power >= noise, False)
 
+    # Create radar noise floor mask dictionary
     mask_dict = {
         'data': is_noise.astype(np.int8),
         'long_name': 'Noise floor mask',
@@ -143,15 +196,15 @@ def hildebrand_noise(
         'valid_max': 1,
         'units': 'unitless',
         '_FillValue': None,
-        'comment': '0 = below noise floor, 1 = above noise floor',
+        'comment': '0 = below noise floor, 1 = at or above noise floor',
     }
     radar.add_field(mask_field, mask_dict, replace_existing=True)
 
-    if remove_salt:
-        basic_fixes.remove_salt(
-            radar, fields=[mask_field], salt_window=salt_window,
-            salt_sample=salt_sample, rays_wrap_around=rays_wrap_around,
-            fill_value=0, mask_data=False, verbose=verbose)
+    # Remove insignificant features from noise floor mask
+    if remove_small_features:
+        basic_fixes._binary_significant_features(
+            radar, mask_field, size_bins=size_bins, size_limits=size_limits,
+            structure=structure, debug=debug, verbose=verbose)
 
     # Parse gate filter
     if gatefilter is None:
@@ -163,12 +216,246 @@ def hildebrand_noise(
     return gatefilter
 
 
+def echo_boundaries(
+        radar, gatefilter=None, texture_window=(3, 3), texture_sample=5,
+        min_texture=None, remove_small_features=False, size_bins=75,
+        size_limits=(0, 300), rays_wrap_around=False, fill_value=None,
+        ncp_field=None, text_field=None, bounds_field=None, debug=False,
+        verbose=False):
+    """
+    """
+
+    # Parse fill value
+    if fill_value is None:
+        fill_value = get_fillvalue()
+
+    # Parse field names
+    if ncp_field is None:
+        ncp_field = get_field_name('normalized_coherent_power')
+    if text_field is None:
+        text_field = '{}_texture'.format(ncp_field)
+    if bounds_field is None:
+        bounds_field = 'echo_boundaries_mask'
+
+    if verbose:
+        print 'Computing significant echo boundaries mask'
+
+    # Compute normalized coherent power texture field
+    ray_window, gate_window = texture_window
+    texture_fields._compute_field(
+        radar, ncp_field, ray_window=ray_window, gate_window=gate_window,
+        min_sample=texture_sample, min_ncp=None, min_sweep=None,
+        max_sweep=None, rays_wrap_around=rays_wrap_around,
+        fill_value=fill_value, text_field=text_field, ncp_field=None)
+
+    if min_texture is None:
+
+        # The 95th percentile defines the minimum coherent power texture for
+        # significant echo boundaries
+        min_texture = np.percentile(
+            radar.fields[text_field]['data'].compressed(), 95,
+            overwrite_input=False, interpolation='linear')
+
+        if debug:
+            max_texture = radar.fields[text_field]['data'].max()
+            _range = [round(min_texture, 3), round(max_texture, 3)]
+            print 'Echo boundary coherent power texture range: {}'.format(
+                _range)
+
+        # Compute percentiles for debugging purposes
+        percentiles = [5, 10, 25, 50, 75, 90, 95, 99, 100]
+        textures = np.percentile(
+            radar.fields[text_field]['data'].compressed(), percentiles,
+            overwrite_input=False, interpolation='linear')
+
+        if debug:
+            for p, texture in zip(percentiles, textures):
+                print '{}% texture = {:.5f}'.format(p, texture)
+
+    # Determine radar gates which meet minimum normalized coherent power
+    # texture
+    is_boundary = radar.fields[text_field]['data'] >= min_texture
+    is_boundary = np.ma.filled(is_boundary, False)
+
+    # Create significant echo boundaries field dictionary
+    bounds_dict = {
+        'data': is_boundary.astype(np.int8),
+        'standard_name': bounds_field,
+        'long_name': 'Significant echo boundaries mask',
+        '_FillValue': None,
+        'units': 'unitless',
+        'comment': '0 = not an echo boundary, 1 = echo boundary',
+    }
+    radar.add_field(bounds_field, bounds_dict, replace_existing=True)
+
+    # Remove insignificant features from significant echo boundaries mask
+    if remove_small_features:
+        basic_fixes._binary_significant_features(
+            radar, bounds_field, size_bins=size_bins, size_limits=size_limits,
+            structure=structure, debug=debug, verbose=verbose)
+
+    # Parse gate filter
+    if gatefilter is None:
+        gatefilter = GateFilter(radar, exclude_based=False)
+
+    # Update gate filter
+    gatefilter.include_equal(bounds_field, 1, op='and')
+
+    return gatefilter
+
+
 def velocity_coherency(
-        radar, gatefilter=None, num_bins=10, limits=None,
-        texture_window=(3, 3), texture_sample=5, min_sigma=None,
-        max_sigma=None, nyquist=None, rays_wrap_around=False,
-        remove_salt=False, salt_window=(5, 5), salt_sample=10, fill_value=None,
-        vdop_field=None, vdop_text_field=None, cohere_field=None,
+        radar, gatefilter=None, text_bins=40, text_limits=(0, 20),
+        nyquist=None, texture_window=(3, 3), texture_sample=5,
+        max_texture=None, rays_wrap_around=False, remove_small_features=False,
+        size_bins=75, size_limits=(0, 300), fill_value=None, vdop_field=None,
+        text_field=None, coherent_field=None, debug=False, verbose=False):
+    """
+    """
+
+    # Parse fill value
+    if fill_value is None:
+        fill_value = get_fillvalue()
+
+    # Parse field names
+    if vdop_field is None:
+        vdop_field = get_field_name('velocity')
+    if text_field is None:
+        text_field = '{}_texture'.format(vdop_field)
+    if coherent_field is None:
+        coherent_field = '{}_coherency_mask'.format(vdop_field)
+
+    if verbose:
+        print 'Computing Doppler velocity coherency mask'
+
+    # Parse Nyquist velocity
+    if nyquist is None:
+        nyquist = radar.get_nyquist_vel(0, check_uniform=True)
+
+    if debug:
+        print 'Radar Nyquist velocity: {:.3f} m/s'.format(nyquist)
+
+    # Compute Doppler velocity texture field
+    ray_window, gate_window = texture_window
+    texture_fields._compute_field(
+        radar, vdop_field, ray_window=ray_window, gate_window=gate_window,
+        min_sample=texture_sample, min_ncp=None, min_sweep=None,
+        max_sweep=None, fill_value=fill_value, ncp_field=None,
+        text_field=text_field)
+
+    # Automatically determine the maximum Doppler velocity texture value which
+    # brackets the coherent part of the Doppler velocity texture distribution
+    if max_texture is None:
+
+        # Bin and count Doppler velocity texture field
+        counts, bin_edges = np.histogram(
+            radar.fields[text_field]['data'].compressed(), bins=text_bins,
+            range=text_limits, normed=False, weights=None, density=False)
+
+        # Compute bin centers and bin width
+        bin_centers = bin_edges[:-1] + np.diff(bin_edges) / 2.0
+        bin_width = np.diff(bin_edges).mean()
+
+        if debug:
+            print 'Bin width: {:.3f} m/s'.format(bin_width)
+
+        # Determine the location of extrema in the Doppler velocity texture
+        # distribution
+        kmin = argrelextrema(counts, np.less, order=1, mode='clip')[0]
+        kmax = argrelextrema(counts, np.greater, order=1, mode='clip')[0]
+
+        if debug:
+            print 'Minima located at: {} m/s'.format(bin_centers[kmin])
+            print 'Maxima located at: {} m/s'.format(bin_centers[kmax])
+
+        # Compute the theoretical noise peak location from Guassian noise
+        # statistics
+        noise_peak_theory = 2.0 * nyquist / np.sqrt(12.0)
+
+        if debug:
+            print 'Theoretical noise peak: {:.3f} m/s'.format(
+                noise_peak_theory)
+
+        # Find the closest Doppler velocity texture distribution peak to the
+        # computed theoretical location
+        # Here we assume that the Doppler velocity texture distribution
+        # has at least one primary mode which correspondes to the incoherent
+        # (noisy) part of the Doppler velocity texture distribution
+        # Depending on the radar volume and the bin width used to define the
+        # distribution, the distribution may be bimodal, with the new peak
+        # corresponding to the coherent part of the Doppler velocity texture
+        # distribution
+        idx = np.abs(bin_centers[kmax] - noise_peak_theory).argmin()
+        noise_peak = bin_centers[kmax][idx]
+
+        if debug:
+            print 'Computed noise peak: {:.3f} m/s'.format(noise_peak)
+
+        # Determine primary and secondary peak locations for debugging
+        # purposes
+        if kmax.size > 1:
+            counts_max = np.sort(counts[kmax], kind='mergesort')[::-1]
+            prm_peak = bin_centers[np.abs(counts - counts_max[0]).argmin()]
+            sec_peak = bin_centers[np.abs(counts - counts_max[1]).argmin()]
+
+            if debug:
+                print 'Primary peak: {:.3f} m/s'.format(prm_peak)
+                print 'Secondary peak: {:.3f} m/s'.format(sec_peak)
+
+        # Determine the left edge of the noise mode
+        # Where this mode becomes a minimum defines the separation between
+        # coherent and incoherent Doppler velocity texture values
+        # TODO: if the chosen bin width is very small than multiple extrema can
+        # exist such that the first minimum to the left of the noise peak is
+        # not the appropriate minimum and the left edge detection breaks down
+        is_left_side = bin_centers[kmin] < noise_peak
+        max_texture = bin_centers[kmin][is_left_side].max() + bin_width / 2.0
+
+        if debug:
+            _range = [0.0, round(max_texture, 3)]
+            print 'Doppler velocity coherent mode: {} m/s'.format(_range)
+
+    # Create the Doppler velocity texture coherency mask
+    is_coherent = np.logical_and(
+            radar.fields[text_field]['data'] >= 0.0,
+            radar.fields[text_field]['data'] <= max_texture)
+    is_coherent = np.ma.filled(is_coherent, False)
+
+    coherent_dict = {
+        'data': is_coherent.astype(np.int8),
+        'long_name': 'Doppler velocity coherency mask',
+        'standard_name': coherent_field,
+        'valid_min': 0,
+        'valid_max': 1,
+        '_FillValue': None,
+        'units': 'unitless',
+        'comment': '0 = incoherent velocity, 1 = coherent velocity',
+    }
+    radar.add_field(coherent_field, coherent_dict, replace_existing=True)
+
+    # Remove insignificant features from Doppler velocity coherency mask
+    if remove_small_features:
+        basic_fixes._binary_significant_features(
+            radar, coherent_field, size_bins=size_bins,
+            size_limits=size_limits, structure=structure, debug=debug,
+            verbose=verbose)
+
+    # Parse gate filter
+    if gatefilter is None:
+        gatefilter = GateFilter(radar, exclude_based=False)
+
+    # Update gate filter
+    gatefilter.include_equal(coherent_field, 1, op='and')
+
+    return gatefilter
+
+
+def velocity_phasor_coherency(
+        radar, gatefilter=None, text_bins=40, text_limits=(0, 20),
+        nyquist=None, texture_window=(3, 3), texture_sample=5,
+        max_texture=None, rays_wrap_around=False, remove_small_features=False,
+        size_bins=75, size_limits=(0, 300), fill_value=None, vdop_field=None,
+        phasor_field=None, text_field=None, coherent_field=None, debug=False,
         verbose=False):
     """
     """
@@ -180,166 +467,159 @@ def velocity_coherency(
     # Parse field names
     if vdop_field is None:
         vdop_field = get_field_name('velocity')
-    if vdop_text_field is None:
-        vdop_text_field = '{}_texture'.format(vdop_field)
-    if cohere_field is None:
-        cohere_field = '{}_coherency_mask'.format(vdop_field)
+    if phasor_field is None:
+        phasor_field = '{}_phasor_real'.format(vdop_field)
+    if text_field is None:
+        text_field = '{}_texture'.format(phasor_field)
+    if coherent_field is None:
+        coherent_field = '{}_coherency_mask'.format(phasor_field)
+
+    if verbose:
+        print 'Computing Doppler velocity phasor coherency mask'
 
     # Parse Nyquist velocity
     if nyquist is None:
-        nyquist = radar.instrument_parameters['nyquist_velocity']['data'][0]
+        nyquist = radar.get_nyquist_vel(0, check_uniform=True)
 
-    if verbose:
-        print 'Nyquist velocity = %.3f m/s' % nyquist
+    if debug:
+        print 'Radar Nyquist velocity: {:.3f} m/s'.format(nyquist)
 
-    # Compute Doppler velocity texture field
+    # Compute the real part of Doppler velocity phasor
+    # Normalize real part of phasor to the Nyquist interval
+    vdop = radar.fields[vdop_field]['data']
+    phasor_real = nyquist * np.cos(np.radians(360.0 * vdop / nyquist))
+
+    # Mask invalid values
+    phasor_real = np.ma.masked_invalid(phasor_real)
+    phasor_real.set_fill_value(fill_value)
+
+    # Create Doppler velocity phasor field dictionary
+    phasor_dict = {
+        'data': phasor_real.astype(np.float32),
+        'long_name': 'Real part of Doppler velocity phasor',
+        'standard_name': phasor_field,
+        'valid_min': -nyquist,
+        'valid_max': nyquist,
+        '_FillValue': phasor_real.fill_value,
+        'units': 'meters_per_second',
+        'comment': ('Real part of Doppler velocity phasor normalized to the '
+                    'Nyquist interval'),
+    }
+    radar.add_field(phasor_field, phasor_dict, replace_existing=True)
+
+    # Compute Doppler velocity phasor texture field
     ray_window, gate_window = texture_window
     texture_fields._compute_field(
-        radar, vdop_field, ray_window=ray_window, gate_window=gate_window,
+        radar, phasor_field, ray_window=ray_window, gate_window=gate_window,
         min_sample=texture_sample, min_ncp=None, min_sweep=None,
         max_sweep=None, fill_value=fill_value, ncp_field=None)
 
-    # Find edges of noise distribution
-    if min_sigma is None and max_sigma is None:
+    # Automatically bracket coherent part of Doppler velocity phasor texture
+    # distribution
+    if max_texture is None:
 
-        # Compute Doppler velocity texture frequency counts
-        # Normalize frequency counts and compute bin centers and bin width
-        vdop_sigma = radar.fields[vdop_text_field]['data']
-        hist, edges = np.histogram(
-            vdop_sigma.compressed(), bins=num_bins, range=limits, normed=False,
-            weights=None, density=False)
-        hist = hist.astype(np.float64) / hist.max()
-        width = np.diff(edges).mean()
-        half_width = width / 2.0
-        bins = edges[:-1] + half_width
+        # Bin Doppler velocity phasor texture data and count occurrences
+        # Compute bin centers and bin width
+        counts, bin_edges = np.histogram(
+            radar.fields[text_field]['data'].compressed(), bins=text_bins,
+            range=text_limits, normed=False, weights=None, density=False)
+        bin_centers = bin_edges[:-1] + np.diff(bin_edges) / 2.0
+        bin_width = np.diff(bin_edges).mean()
 
-        if verbose:
-            print 'Bin width = %.2f m/s' % width
+        if debug:
+            print 'Bin width: {:.3f} m/s'.format(bin_width)
 
-        # Determine Doppler velocity texture distribution extrema locations
-        k_min = argrelextrema(
-            hist, np.less, axis=0, order=1, mode='clip')[0]
-        k_max = argrelextrema(
-            hist, np.greater, axis=0, order=1, mode='clip')[0]
+        # Determine positions of the extrema in the Doppler velocity phasor
+        # texture distribution
+        kmin = argrelextrema(counts, np.less, order=1, mode='clip')[0]
+        kmax = argrelextrema(counts, np.greater, order=1, mode='clip')[0]
 
-        if verbose:
-            print 'Minima located at %s m/s' % bins[k_min]
-            print 'Maxima located at %s m/s' % bins[k_max]
+        if debug:
+            print 'Minima located at: {} m/s'.format(bin_centers[kmin])
+            print 'Maxima located at: {} m/s'.format(bin_centers[kmax])
 
-        #  Case 1: Definitive clear air volume with no velocity aliasing
-        if k_min.size <= 1 or k_max.size <= 1:
+        # Compute the theoretical noise peak location from Guassian noise
+        # statistics
+        noise_peak_theory = 2.0 * nyquist / np.sqrt(12.0)
 
-            # Bracket noise distribution
-            # Add (to the left side) or subtract (to the right side) the half
-            # bin width to account for the bin width
-            max_sigma = nyquist
+        if debug:
+            print 'Theoretical noise peak: {:.3f} m/s'.format(
+                noise_peak_theory)
 
-            # Case 1.1: No coherent signal in the Doppler velocity texture
-            # distribution
-            if k_min.size == 0:
-                min_sigma = bins.min() - half_width
-            else:
-                min_sigma = bins[k_min][0] + half_width
+        # Find the closest Doppler velocity phasor texture distribution peak to
+        # the computed theoretical location
+        # Here we assume that the Doppler velocity phasor texture distribution
+        # has at least one primary mode which correspondes to the incoherent
+        # (noisy) part of the Doppler velocity phasor texture distribution
+        # Depending on the radar volume and the bin width used to define the
+        # distribution, the distribution may be bimodal, with the new peak
+        # corresponding to the coherent part of the Doppler velocity phasor
+        # texture distribution
+        idx = np.abs(bin_centers[kmax] - noise_peak_theory).argmin()
+        noise_peak = bin_centers[kmax][idx]
 
-            if verbose:
-                print 'Computed min_sigma = %.2f m/s' % min_sigma
-                print 'Computed max_sigma = %.2f m/s' % max_sigma
-                print 'Radar volume is a clear air volume'
+        if debug:
+            print 'Computed noise peak: {:.3f} m/s'.format(noise_peak)
 
-        # Case 2: Typical radar volume containing sufficient scatterers (e.g.,
-        # hydrometeors, insects, etc.)
-        # Velocity aliasing may or may not be present
-        else:
+        # Determine primary and secondary peak locations for debugging
+        # purposes
+        if kmax.size > 1:
+            counts_max = np.sort(counts[kmax], kind='mergesort')[::-1]
+            prm_peak = bin_centers[np.abs(counts - counts_max[0]).argmin()]
+            sec_peak = bin_centers[np.abs(counts - counts_max[1]).argmin()]
 
-            # Compute primary and secondary peak locations
-            # One of these peaks defines the noise distribution
-            hist_max = np.sort(hist[k_max], kind='mergesort')[::-1]
-            prm_peak = bins[np.abs(hist - hist_max[0]).argmin()]
-            sec_peak = bins[np.abs(hist - hist_max[1]).argmin()]
-            peaks = np.array([prm_peak, sec_peak], dtype=np.float64)
+            if debug:
+                    print 'Primary peak: {:.3f} m/s'.format(prm_peak)
+                    print 'Secondary peak: {:.3f} m/s'.format(sec_peak)
 
-            if verbose:
-                print 'Primary peak located at %.2f m/s' % prm_peak
-                print 'Secondary peak located at %.2f m/s' % sec_peak
+        # Determine the left edge of the noise distribution
+        # Where this distribution becomes a minimum will define the separation
+        # between coherent and incoherent Doppler velocity phasor values
+        is_left_side = bin_centers[kmin] < noise_peak
+        max_texture = bin_centers[kmin][is_left_side].max() + bin_width / 2.0
 
-            # The noise distribution will typically be defined as the largest
-            # (in terms of Doppler velocity) of the primary and secondary
-            # peaks, e.g., if the primary (secondary) peak velocity texture is
-            # greater than the secondary (primary) peak velocity texture, than
-            # the primary (secondary) peak defines the noise distribution
-            # However in rare circumstances where the velocity aliasing signal
-            # is very strong, this will not be the case
-            # The most general way to determe which peak is the noise peak is
-            # to use basic Guassian noise theory, which predicts that the noise
-            # peak (mean) is a function of Nyquist velocity
-            idx = np.abs(peaks - 2.0 * nyquist / np.sqrt(12.0)).argmin()
-            noise_peak_theory = peaks[idx]
-            noise_peak = np.max(peaks)
+        if debug:
+            _range = [0.0, round(max_texture, 3)]
+            print 'Doppler velocity phasor coherency mode: {} m/s'.format(
+                _range)
 
-            # Case 2.1: Strong velocity aliasing signal
-            if noise_peak != noise_peak_theory:
-                noise_peak = noise_peak_theory
-                if verbose:
-                    print 'Strong velocity aliasing signal'
+    # Create Doppler velocity phasor coherency mask
+    is_coherent = np.logical_and(
+        radar.fields[text_field]['data'] >= 0.0,
+        radar.fields[text_field]['data'] <= max_texture)
+    is_coherent = np.ma.filled(is_coherent, False)
 
-            if verbose:
-                print 'Noise peak located at %.2f m/s' % noise_peak
-
-            # Determine left and right sides of noise distribution
-            left_side = bins[k_min] < noise_peak
-            right_side = bins[k_min] > noise_peak
-
-            # Bracket noise distribution
-            # Add (to the left side) or subtract (to the right side) the half
-            # bin width to account for the bin width
-            min_sigma = bins[k_min][left_side].max() + half_width
-
-            # Case 2.2: No velocity aliasing signal
-            if any(right_side):
-                max_sigma = bins[k_min][right_side].min() - half_width
-            else:
-                max_sigma = nyquist
-
-            if verbose:
-                print 'Computed min_sigma = %.2f m/s' % min_sigma
-                print 'Computed max_sigma = %.2f m/s' % max_sigma
-
-    # Create the Doppler velocity texture coherency mask
-    mask = np.logical_or(
-        radar.fields[vdop_text_field]['data'] <= min_sigma,
-        radar.fields[vdop_text_field]['data'] >= max_sigma)
-    mask = np.ma.filled(mask, False)
-
-    mask_dict = {
-        'data': mask.astype(np.int8),
-        'long_name': 'Doppler velocity coherency mask',
-        'standard_name': cohere_field,
+    # Create Doppler velocity phasor coherency mask dictionary
+    coherent_dict = {
+        'data': is_coherent.astype(np.int8),
+        'long_name': 'Doppler velocity phasor coherency',
+        'standard_name': coherent_field,
         'valid_min': 0,
         'valid_max': 1,
         '_FillValue': None,
         'units': 'unitless',
-        'comment': '0 = incoherent velocity, 1 = coherent velocity',
+        'comment': '0 = incoherent value, 1 = coherent value',
     }
-    radar.add_field(cohere_field, mask_dict, replace_existing=True)
+    radar.add_field(coherent_field, coherent_dict, replace_existing=True)
 
-    # Remove salt and pepper noise from Doppler velocity coherency mask
-    if remove_salt:
-        basic_fixes.remove_salt(
-            radar, fields=[cohere_field], salt_window=salt_window,
-            salt_sample=salt_sample, rays_wrap_around=rays_wrap_around,
-            fill_value=0, mask_data=False, verbose=verbose)
+    # Remove insignificant features from Doppler velocity phasor coherency mask
+    if remove_small_features:
+        basic_fixes._binary_significant_features(
+            radar, coherent_field, size_bins=size_bins,
+            size_limits=size_limits, structure=structure, debug=debug,
+            verbose=verbose)
 
     # Parse gate filter
     if gatefilter is None:
         gatefilter = GateFilter(radar, exclude_based=False)
 
     # Update gate filter
-    gatefilter.include_equal(cohere_field, 1, op='and')
+    gatefilter.include_equal(coherent_field, 1, op='and')
 
     return gatefilter
 
 
-def spectrum_width_coherency(
+def _spectrum_width_coherency(
         radar, gatefilter=None, num_bins=10, limits=None,
         texture_window=(3, 3), texture_sample=5, min_sigma=None,
         max_sigma=None, rays_wrap_around=False, remove_salt=False,
@@ -484,177 +764,16 @@ def spectrum_width_coherency(
     return gatefilter
 
 
-def velocity_phasor_coherency(
-        radar, gatefilter=None, num_bins=10, limits=None,
-        texture_window=(3, 3), texture_sample=5, min_sigma=None,
-        max_sigma=None, rays_wrap_around=False, remove_salt=False,
-        salt_window=(5, 5), salt_sample=10, fill_value=None, vdop_field=None,
-        vdop_phase_field=None, phase_text_field=None, cohere_field=None,
-        verbose=False):
+def _significant_features(
+        radar, field, gatefilter=None, min_size=None, nbins=100,
+        limits=(0, 100), structure=None, remove_size_field=True,
+        fill_value=None, size_field=None, debug=False, verbose=False):
     """
     """
 
     # Parse fill value
     if fill_value is None:
         fill_value = get_fillvalue()
-
-    # Parse field names
-    if vdop_field is None:
-        vdop_field = get_field_name('velocity')
-    if vdop_phase_field is None:
-        vdop_phase_field = '{}_phasor'.format(vdop_field)
-    if phase_text_field is None:
-        phase_text_field = '{}_texture'.format(vdop_phase_field)
-    if cohere_field is None:
-        cohere_field = '{}_coherency_mask'.format(vdop_phase_field)
-
-    # Compute the real part of Doppler velocity phasor
-    vdop = radar.fields[vdop_field]['data']
-    vdop_phase = np.real(np.exp(1j * np.radians(vdop)))
-    vdop_phase.set_fill_value(fill_value)
-
-    # Add Doppler velocity phasor field to radar object
-    phasor = {
-        'data': vdop_phase.astype(np.float32),
-        'long_name': 'Doppler velocity phasor',
-        'standard_name': vdop_phase_field,
-        'valid_min': -1.0,
-        'valid_max': 1.0,
-        '_FillValue': vdop_phase.fill_value,
-        'units': 'unitless',
-        'comment': 'Real part of phasor',
-    }
-    radar.add_field(vdop_phase_field, phasor, replace_existing=True)
-
-    # Compute Doppler velocity phasor texture field
-    ray_window, gate_window = texture_window
-    texture_fields._compute_field(
-        radar, vdop_phase_field, ray_window=ray_window,
-        gate_window=gate_window, min_sample=texture_sample, min_ncp=None,
-        min_sweep=None, max_sweep=None, fill_value=fill_value, ncp_field=None)
-
-    # Automatically bracket noise distribution
-    if min_sigma is None and max_sigma is None:
-
-        # Compute Doppler velocity phasor texture frequency counts
-        # Normalize histogram counts and compute bin centers and bin width
-        phase_sigma = radar.fields[phase_text_field]['data']
-        hist, edges = np.histogram(
-            phase_sigma.compressed(), bins=num_bins, range=limits,
-            normed=False, weights=None, density=False)
-        hist = hist.astype(np.float64) / hist.max()
-        width = np.diff(edges).mean()
-        half_width = width / 2.0
-        bins = edges[:-1] + half_width
-
-        if verbose:
-            print 'Bin width = %.2f' % width
-
-        # Determine distribution extrema locations
-        k_min = argrelextrema(
-            hist, np.less, axis=0, order=1, mode='clip')[0]
-        k_max = argrelextrema(
-            hist, np.greater, axis=0, order=1, mode='clip')[0]
-
-        if verbose:
-            print 'Minima located at %s' % bins[k_min]
-            print 'Maxima located at %s' % bins[k_max]
-
-        #  Potentially a clear air volume
-        if k_min.size <= 1 or k_max.size <= 1:
-
-            # Bracket noise distribution
-            # Add (left side) or subtract (right side) the half bin width to
-            # account for the bin width
-            max_sigma = bins.max() + half_width
-
-            # Account for the no coherent signal case
-            if k_min.size == 0:
-                min_sigma = bins.min() - half_width
-            else:
-                min_sigma = bins[k_min][0] + half_width
-
-            if verbose:
-                print 'Computed min_sigma = %.2f' % min_sigma
-                print 'Computed max_sigma = %.2f' % max_sigma
-                print 'Radar volume is likely a clear air volume'
-
-        # Typical volume containing sufficient scatterers (e.g., hydrometeors,
-        # insects, etc.)
-        else:
-
-            # Compute primary and secondary peak locations
-            hist_max = np.sort(hist[k_max], kind='mergesort')[::-1]
-            prm_peak = bins[np.abs(hist - hist_max[0]).argmin()]
-            sec_peak = bins[np.abs(hist - hist_max[1]).argmin()]
-
-            if verbose:
-                print 'Primary peak located at %.2f' % prm_peak
-                print 'Secondary peak located at %.2f' % sec_peak
-
-            # If the primary (secondary) peak velocity texture is greater than
-            # the secondary (primary) peak velocity texture, than the primary
-            # (secondary) peak defines the noise distribution
-            noise_peak = np.max([prm_peak, sec_peak])
-
-            if verbose:
-                print 'Noise peak located at %.2f' % noise_peak
-
-            # Determine left/right sides of noise distribution
-            left_side = bins[k_min] < noise_peak
-            right_side = bins[k_min] > noise_peak
-
-            # Bracket noise distribution
-            # Add (left side) or subtract (right side) the half bin width to
-            # account for the bin width
-            min_sigma = bins[k_min][left_side].max() + half_width
-            max_sigma = bins.max() + half_width
-
-            if verbose:
-                print 'Computed min_sigma = %.2f' % min_sigma
-                print 'Computed max_sigma = %.2f' % max_sigma
-
-    # Create Doppler velocity phasor texture coherency mask
-    mask = np.logical_or(
-        radar.fields[phase_text_field]['data'] <= min_sigma,
-        radar.fields[phase_text_field]['data'] >= max_sigma)
-    mask = np.ma.filled(mask, False)
-
-    mask_dict = {
-        'data': mask.astype(np.int8),
-        'long_name': 'Doppler velocity phasor coherency',
-        'standard_name': cohere_field,
-        'valid_min': 0,
-        'valid_max': 1,
-        '_FillValue': None,
-        'units': 'unitless',
-        'comment': ('0 = incoherent velocity phasor, '
-                    '1 = coherent velocity phasor'),
-    }
-    radar.add_field(cohere_field, mask_dict, replace_existing=True)
-
-    # Remove salt and pepper noise from mask
-    if remove_salt:
-        basic_fixes.remove_salt(
-            radar, fields=[cohere_field], salt_window=salt_window,
-            salt_sample=salt_sample, rays_wrap_around=rays_wrap_around,
-            fill_value=0, mask_data=False, verbose=verbose)
-
-    # Parse gate filter
-    if gatefilter is None:
-        gatefilter = GateFilter(radar, exclude_based=False)
-
-    # Update gate filter
-    gatefilter.include_equal(cohere_field, 1, op='and')
-
-    return gatefilter
-
-
-def _significant_features(
-        radar, field, gatefilter=None, num_bins=100, limits=(0, 100),
-        structure=None, fill_value=None, size_field=None, debug=False):
-    """
-    """
 
     # Parse field names
     if size_field is None:
@@ -666,22 +785,20 @@ def _significant_features(
 
     # Parse binary structuring element
     if structure is None:
-        structure = ndimage.generate_binary_structure(2, 1)
+        structure = ndimage.generate_binary_structure(2, 2)
 
-    # Initialize echo feature size field
-    radar.fields[size_field] = get_metadata(size_field)
-    radar.fields[size_field]['data'] = np.zeros_like(
-        radar.fields[field]['data'])
+    # Initialize echo feature size array
+    size_data = np.zeros_like(radar.fields[field]['data'])
 
     # Loop over all sweeps
     feature_sizes = []
     for sweep in radar.iter_slice():
 
         # Parse radar sweep data and define only valid gates
-        is_valid_gate = ~radar.fields[field]['data'][sweep].mask
+        is_valid_gate = np.logical_not(radar.fields[field]['data'][sweep].mask)
 
-        # Label radar sweep data and create index array which defines each
-        # unique label
+        # Label the connected features in radar sweep data and create index
+        # array which defines each unique label (feature)
         labels, nlabels = ndimage.label(
             is_valid_gate, structure=structure, output=None)
         index = np.arange(1, nlabels + 1, 1)
@@ -696,10 +813,10 @@ def _significant_features(
         # Append sweep echo feature sizes
         feature_sizes.append(sweep_sizes)
 
-        # Set each label to its total size (in radar gates)
+        # Set each label (feature) to its total size (in radar gates)
         for label, size in zip(index, sweep_sizes):
             is_label = labels == label
-            radar.fields[size_field]['data'][sweep][is_label] = size
+            size_data[sweep][is_label] = size
 
     # Stack sweep echo feature sizes
     feature_sizes = np.hstack(feature_sizes)
@@ -707,8 +824,8 @@ def _significant_features(
     # Compute histogram of echo feature sizes, bin centers and bin
     # width
     counts, bin_edges = np.histogram(
-        feature_sizes, bins=num_bins, range=limits, normed=False,
-        weights=None, density=False)
+        feature_sizes, bins=nbins, range=limits, normed=False, weights=None,
+        density=False)
     bin_centers = bin_edges[:-1] + np.diff(bin_edges) / 2.0
     bin_width = np.diff(bin_edges).mean()
 
@@ -718,14 +835,13 @@ def _significant_features(
     # Compute the peak of the echo feature size distribution
     # We expect the peak of the echo feature size distribution to be close to 1
     # radar gate
-    idx = np.abs(counts - counts.max()).argmin()
-    peak_size = bin_centers[idx] - bin_width / 2.0
+    peak_size = bin_centers[counts.argmax()] - bin_width / 2.0
 
     if debug:
         print 'Echo feature size at peak: {} gate(s)'.format(peak_size)
 
-    # Determine the first instance when the echo feature size reaches 0 radar
-    # gates after the distribution peak
+    # Determine the first instance when the count (sample size) for an echo
+    # feature size bin reaches 0 after the distribution peak
     # This will define the minimum echo feature size
     is_zero_size = np.logical_and(bin_centers > peak_size, counts == 0)
     min_size = bin_centers[is_zero_size].min() - bin_width / 2.0
@@ -733,7 +849,25 @@ def _significant_features(
     if debug:
         print 'Minimum echo feature size: {} gates'.format(min_size)
 
+    # Mask invalid feature sizes, e.g., zero-size features
+    size_data = np.ma.masked_equal(size_data, 0, copy=False)
+    size_data.set_fill_value(fill_value)
+
+    # Add echo feature size field to radar
+    size_dict = {
+        'data': size_data.astype(np.int32),
+        'standard_name': size_field,
+        'long_name': '',
+        '_FillValue': size_data.fill_value,
+        'units': 'unitless',
+    }
+    radar.add_field(size_field, size_dict, replace_existing=True)
+
     # Update gate filter
     gatefilter.include_above(size_field, min_size, op='and', inclusive=False)
+
+    # Remove eacho feature size field
+    if remove_size_field:
+        radar.fields.pop(size_field, None)
 
     return gatefilter
