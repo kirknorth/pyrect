@@ -85,7 +85,7 @@ def remove_salt(radar, fields=None, salt_window=(3, 3), salt_sample=5,
         data = np.asfortranarray(data, dtype=np.float64)
 
         if debug:
-            N = np.sum(~np.isclose(data, fill_value, atol=1.0e-8))
+            N = np.count_nonzero(~np.isclose(data, fill_value, atol=1.0e-5))
             print 'Sample size before salt removal: {}'.format(N)
 
         # Fortran wrapper
@@ -95,12 +95,13 @@ def remove_salt(radar, fields=None, salt_window=(3, 3), salt_sample=5,
             rays_wrap=rays_wrap_around, fill_value=fill_value)
 
         if debug:
-            N = np.sum(~np.isclose(data, fill_value, atol=1.0e-8))
+            N = np.count_nonzero(~np.isclose(data, fill_value, atol=1.0e-5))
             print 'Sample size after salt removal: {}'.format(N)
 
         # Mask invalid data
         if mask_data:
             data = np.ma.masked_equal(data, fill_value, copy=False)
+            data.set_fill_value(fill_value)
 
         radar.fields[field]['data'] = data.astype(dtype_orig)
 
@@ -140,8 +141,8 @@ def interpolate_missing(
         data = np.asfortranarray(data, dtype=np.float64)
 
         if debug:
-            n = np.isclose(data, fill_value, atol=1.0e-8).sum()
-            print 'Number of missing gates before fill : {}'.format(n)
+            N = np.count_nonzero(~np.isclose(data, fill_value, atol=1.0e-5))
+            print 'Sample size before fill: {}'.format(N)
 
         # Parse sweep parameters
         # Offset index arrays in order to be compatible with Fortran and avoid
@@ -159,11 +160,12 @@ def interpolate_missing(
             raise ValueError('Unsupported interpolation method')
 
         if debug:
-            n = np.isclose(data, fill_value, atol=1.0e-8).sum()
-            print 'Number of missing gates after fill : {}'.format(n)
+            N = np.count_nonzero(~np.isclose(data, fill_value, atol=1.0e-5))
+            print 'Sample size after fill: {}'.format(N)
 
         # Mask invalid data
         data = np.ma.masked_equal(data, fill_value, copy=False)
+        data.set_fill_value(fill_value)
 
         # Add interpolated data to radar object
         radar.fields[field]['data'] = data.astype(dtype_orig)
@@ -250,7 +252,8 @@ def _binary_significant_features(
         distribution.
     size_limits : list or tuple, optional
         Limits of the echo feature size distribution. The upper limit needs to
-        be large enough to include the minimum feature size.
+        be large enough to include the minimum feature size. The size bin width
+        is defined by both the size_bins and size_limits parameters.
     structure : array_like, optional
         Binary structuring element used to define connected features. The
         default structuring element has a squared connectivity equal to one.

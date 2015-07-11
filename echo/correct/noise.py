@@ -59,7 +59,7 @@ def significant_detection(
         (e.g., PPI VCP).
     min_ncp : float, optional
         Minimum normalized coherent power (signal quality) value used to
-        indicate a significant echo. This criteria is not used by default.
+        indicate a significant echo.
     ncp_field : str, optional
         Minimum normalized coherent power (signal quality) field name. The
         default uses the Py-ART configuation file.
@@ -73,7 +73,8 @@ def significant_detection(
     Returns
     -------
     gatefilter : GateFilter
-        Indicates which radar gates are valid and invalid.
+        Py-ART GateFilter object indicating which radar gates are valid and
+        invalid.
     """
 
     # Parse field names
@@ -218,11 +219,27 @@ def hildebrand_noise(
 
 def echo_boundaries(
         radar, gatefilter=None, texture_window=(3, 3), texture_sample=5,
-        min_texture=None, remove_small_features=False, size_bins=75,
-        size_limits=(0, 300), rays_wrap_around=False, fill_value=None,
-        ncp_field=None, text_field=None, bounds_field=None, debug=False,
-        verbose=False):
+        min_texture=None, bounds_percentile=95.0, remove_small_features=False,
+        size_bins=75, size_limits=(0, 300), rays_wrap_around=False,
+        fill_value=None, sqi_field=None, text_field=None, bounds_field=None,
+        debug=False, verbose=False):
     """
+    Objectively determine the location of significant echo boundaries through
+    analysis of signal quality index (SQI) texture. The a priori assumption is
+    that at echo boundaries (e.g., cloud boundaries), the SQI field decreases
+    substantially and therefore the SQI texture field is large near echo
+    boundaries.
+
+    Parameters
+    ----------
+    radar : Radar
+        Radar object containing the SQI field used to derive significant echo
+        boundaries.
+
+    Returns
+    -------
+    gatefilter : GateFilter
+
     """
 
     # Parse fill value
@@ -230,37 +247,36 @@ def echo_boundaries(
         fill_value = get_fillvalue()
 
     # Parse field names
-    if ncp_field is None:
-        ncp_field = get_field_name('normalized_coherent_power')
+    if sqi_field is None:
+        sqi_field = get_field_name('normalized_coherent_power')
     if text_field is None:
-        text_field = '{}_texture'.format(ncp_field)
+        text_field = '{}_texture'.format(sqi_field)
     if bounds_field is None:
         bounds_field = 'echo_boundaries_mask'
 
     if verbose:
         print 'Computing significant echo boundaries mask'
 
-    # Compute normalized coherent power texture field
+    # Compute signal quality index texture field
     ray_window, gate_window = texture_window
     texture_fields._compute_field(
-        radar, ncp_field, ray_window=ray_window, gate_window=gate_window,
+        radar, sqi_field, ray_window=ray_window, gate_window=gate_window,
         min_sample=texture_sample, min_ncp=None, min_sweep=None,
         max_sweep=None, rays_wrap_around=rays_wrap_around,
         fill_value=fill_value, text_field=text_field, ncp_field=None)
 
     if min_texture is None:
 
-        # The 95th percentile defines the minimum coherent power texture for
-        # significant echo boundaries
+        # The specified boundary percentile defines the minimum SQI texture
+        # value for significant echo boundaries
         min_texture = np.percentile(
-            radar.fields[text_field]['data'].compressed(), 95,
+            radar.fields[text_field]['data'].compressed(), bounds_percentile,
             overwrite_input=False, interpolation='linear')
 
         if debug:
             max_texture = radar.fields[text_field]['data'].max()
             _range = [round(min_texture, 3), round(max_texture, 3)]
-            print 'Echo boundary coherent power texture range: {}'.format(
-                _range)
+            print 'Echo boundary SQI texture range: {}'.format(_range)
 
         # Compute percentiles for debugging purposes
         percentiles = [5, 10, 25, 50, 75, 90, 95, 99, 100]
@@ -270,7 +286,7 @@ def echo_boundaries(
 
         if debug:
             for p, texture in zip(percentiles, textures):
-                print '{}% texture = {:.5f}'.format(p, texture)
+                print '{}% SQI texture = {:.5f}'.format(p, texture)
 
     # Determine radar gates which meet minimum normalized coherent power
     # texture
@@ -765,8 +781,8 @@ def _spectrum_width_coherency(
 
 
 def _significant_features(
-        radar, field, gatefilter=None, min_size=None, nbins=100,
-        limits=(0, 100), structure=None, remove_size_field=True,
+        radar, field, gatefilter=None, min_size=None, size_bins=75,
+        size_limits=(0, 300), structure=None, remove_size_field=True,
         fill_value=None, size_field=None, debug=False, verbose=False):
     """
     """
@@ -785,17 +801,18 @@ def _significant_features(
 
     # Parse binary structuring element
     if structure is None:
-        structure = ndimage.generate_binary_structure(2, 2)
+        structure = ndimage.generate_binary_structure(2, 1)
 
     # Initialize echo feature size array
-    size_data = np.zeros_like(radar.fields[field]['data'])
+    size_data = np.zeros_like(
+        radar.fields[field]['data'], subok=False, dtype=np.int32)
 
     # Loop over all sweeps
     feature_sizes = []
     for sweep in radar.iter_slice():
 
         # Parse radar sweep data and define only valid gates
-        is_valid_gate = np.logical_not(radar.fields[field]['data'][sweep].mask)
+        is_valid_gate = ~radar.fields[field]['data'][sweep].mask
 
         # Label the connected features in radar sweep data and create index
         # array which defines each unique label (feature)
@@ -807,16 +824,16 @@ def _significant_features(
             print 'Number of unique features for {}: {}'.format(sweep, nlabels)
 
         # Compute the size (in radar gates) of each echo feature
-        sweep_sizes = ndimage.labeled_comprehension(
-            is_valid_gate, labels, index, np.sum, np.int32, 0)
+        # Check for case where no echo features are found, e.g., no data in
+        # sweep
+        if nlabels > 0:
+            sweep_sizes = ndimage.labeled_comprehension(
+                is_valid_gate, labels, index, np.count_nonzero, np.int32, 0)
+            feature_sizes.append(sweep_sizes)
 
-        # Append sweep echo feature sizes
-        feature_sizes.append(sweep_sizes)
-
-        # Set each label (feature) to its total size (in radar gates)
-        for label, size in zip(index, sweep_sizes):
-            is_label = labels == label
-            size_data[sweep][is_label] = size
+            # Set each label (feature) to its total size (in radar gates)
+            for label, size in zip(index, sweep_sizes):
+                size_data[sweep][labels == label] = size
 
     # Stack sweep echo feature sizes
     feature_sizes = np.hstack(feature_sizes)
@@ -824,8 +841,8 @@ def _significant_features(
     # Compute histogram of echo feature sizes, bin centers and bin
     # width
     counts, bin_edges = np.histogram(
-        feature_sizes, bins=nbins, range=limits, normed=False, weights=None,
-        density=False)
+        feature_sizes, bins=size_bins, range=size_limits, normed=False,
+        weights=None, density=False)
     bin_centers = bin_edges[:-1] + np.diff(bin_edges) / 2.0
     bin_width = np.diff(bin_edges).mean()
 
@@ -838,16 +855,18 @@ def _significant_features(
     peak_size = bin_centers[counts.argmax()] - bin_width / 2.0
 
     if debug:
-        print 'Echo feature size at peak: {} gate(s)'.format(peak_size)
+        print 'Feature size at peak: {} gate(s)'.format(peak_size)
 
     # Determine the first instance when the count (sample size) for an echo
     # feature size bin reaches 0 after the distribution peak
     # This will define the minimum echo feature size
-    is_zero_size = np.logical_and(bin_centers > peak_size, counts == 0)
+    is_zero_size = np.logical_and(
+        bin_centers > peak_size, np.isclose(counts, 0, atol=1.0e-5))
     min_size = bin_centers[is_zero_size].min() - bin_width / 2.0
 
     if debug:
-        print 'Minimum echo feature size: {} gates'.format(min_size)
+        _range = [0.0, min_size]
+        print 'Insignificant feature size range: {} gates'.format(_range)
 
     # Mask invalid feature sizes, e.g., zero-size features
     size_data = np.ma.masked_equal(size_data, 0, copy=False)

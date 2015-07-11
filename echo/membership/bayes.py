@@ -9,31 +9,15 @@ import numpy as np
 from pyart.config import get_fillvalue, get_field_name
 
 from . import member
+from ..location import common
 
 
-
-def _cond_prob(xi, pdf, bins, zero=1.0e-10):
-    """
-    Parse the conditional probability of the input data given its probability
-    density function.
-    """
-
-    # Compute the probability of xi occuring given the underlying probability
-    # density
-    P = pdf[np.abs(bins - xi).argmin()]
-
-    # Account for the zero frequency (probability) situation
-    if P < zero:
-        P = zero
-
-    return P
-
-
-def classify(radar, textures=None, moments=None, clutter_map=None,
-             gatefilter=None, weights=1.0, class_prob='equal', min_inputs=1,
-             min_ncp=None, zero=1.0e-10, ignore_inputs=None, use_insects=True,
-             fill_value=None, ncp_field=None, precip_field=None,
-             ground_field=None, insect_field=None, verbose=False):
+def classify(radar, textures=None, moments=None, heights=None,
+             nonprecip_map=None, gatefilter=None, weights=1.0,
+             class_prob='equal', min_inputs=1, min_ncp=None, zero=1.0e-10,
+             ignore_inputs=None, use_insects=True, fill_value=None,
+             ncp_field=None, cloud_field=None, ground_field=None,
+             insect_field=None, verbose=False):
     """
     """
 
@@ -44,30 +28,32 @@ def classify(radar, textures=None, moments=None, clutter_map=None,
     # Parse field names
     if ncp_field is None:
         ncp_field = get_field_name('normalized_coherent_power')
-    if precip_field is None:
-        precip_field = 'precipitation'
+    if cloud_field is None:
+        cloud_field = 'cloud'
     if ground_field is None:
-        ground_field = 'ground_clutter'
+        ground_field = 'ground'
     if insect_field is None:
-        insect_field = 'insects'
+        insect_field = 'insect'
 
     # Parse ignore fields
     if ignore_inputs is None:
         ignore_inputs = []
 
     # Check if at least one input is available
-    if textures is None and moments is None and clutter_map is None:
+    if textures is None and moments is None:
         raise ValueError('No inputs specified')
 
     # Parse classification labels
     if use_insects:
-        labels = [precip_field, ground_field, insect_field]
+        labels = [cloud_field, ground_field, insect_field]
     else:
-        labels = [precip_field, ground_field]
+        labels = [cloud_field, ground_field]
         if textures is not None:
             textures.pop(insect_field, None)
         if moments is not None:
             moments.pop(insect_field, None)
+        if heights is not None:
+            heights.pop(insect_field, None)
 
     # Determine total number of inputs available for each class
     inputs = {label: 0 for label in labels}
@@ -79,7 +65,10 @@ def classify(radar, textures=None, moments=None, clutter_map=None,
         for label, moment in moments.iteritems():
             fields = [field for field in moment if field not in ignore_inputs]
             inputs[label] += len(fields)
-    if clutter_map is not None:
+    if heights is not None:
+        for label in labels:
+            inputs[label] += 1
+    if ground_map is not None:
         inputs[ground_field] += 1
 
     if verbose:
@@ -119,7 +108,7 @@ def classify(radar, textures=None, moments=None, clutter_map=None,
                 bins = histogram['bin centers']
 
                 # Mask incoherent gates
-                if min_ncp is not None:
+                if min_ncp is not None and ncp_field in radar.fields:
                     ncp = radar.fields[ncp_field]['data']
                     data = np.ma.masked_where(ncp < min_ncp, data)
 
@@ -152,7 +141,7 @@ def classify(radar, textures=None, moments=None, clutter_map=None,
                 bins = histogram['bin centers']
 
                 # Mask incoherent gates
-                if min_ncp is not None:
+                if min_ncp is not None and ncp_field in radar.fields:
                     ncp = radar.fields[ncp_field]['data']
                     data = np.ma.masked_where(ncp < min_ncp, data)
 
@@ -171,9 +160,35 @@ def classify(radar, textures=None, moments=None, clutter_map=None,
                 # Bayes classifier
                 P_tot[label][valid_prob] *= P_c * P_cond[valid_prob] / P_xi
 
-    # Process clutter frequency map
-    if clutter_map is not None:
-        pdf = clutter_map['clutter frequency map']
+    # Process radar gate heights
+    if heights is not None:
+        for label in labels:
+
+            # Parse height distribution data
+            pdf = heights[label]['probability density']
+            bins = heights[label]['bin centers']
+
+            # Compute radar gate heights in kilometers
+            x, y, data = common.standard_refraction(radar, use_km=True)
+
+            # Prepare data for ingest into Fortran wrapper
+            data = np.ma.filled(data, fill_value)
+            data = np.asfortranarray(data, dtype=np.float64)
+
+            # Compute conditional probability for each radar gate
+            P_cond = member.conditional_all(
+                data, pdf, bins, zero=zero, fill_value=fill_value)
+
+            # Determine where conditional probability is valid
+            valid_prob = P_cond != fill_value
+            num_inputs[label] += valid_prob
+
+            # Bayes classifier
+            P_tot[label][valid_prob] *= P_c * P_cond[valid_prob] / P_xi
+
+    # Process ground frequency map
+    if ground_map is not None:
+        pdf = ground_map['ground frequency map']
 
     # Mask gates where not enough inputs were available to properly classify
     for label, sample_size in num_inputs.iteritems():
@@ -187,35 +202,52 @@ def classify(radar, textures=None, moments=None, clutter_map=None,
                 gatefilter.gate_excluded, P_tot[label])
 
     # Determine where each class is most probable
-    echo = np.zeros(P_tot[precip_field].shape, dtype=np.int32)
+    echo = np.zeros(P_tot[cloud_field].shape, dtype=np.int8)
     if use_insects:
         is_ground = np.logical_and(
-            P_tot[ground_field] > P_tot[precip_field],
+            P_tot[ground_field] > P_tot[cloud_field],
             P_tot[ground_field] > P_tot[insect_field])
         is_insect = np.logical_and(
             P_tot[insect_field] > P_tot[ground_field],
-            P_tot[insect_field] > P_tot[precip_field])
+            P_tot[insect_field] > P_tot[cloud_field])
         is_missing = P_tot[ground_field].mask
         echo[is_ground] = 1
         echo[is_insect] = 2
         echo[is_missing] = -1
 
     else:
-        is_ground = P_tot[ground_field] > P_tot[precip_field]
+        is_ground = P_tot[ground_field] > P_tot[cloud_field]
         is_missing = P_tot[ground_field].mask
         echo[is_ground] = 1
         echo[is_missing] = -1
 
     # Create echo classification dictionary and add it to the radar object
     echo = {
-        'data': echo,
-        'long_name': 'Echo classification',
-        'standard_name': 'echo_classification',
+        'data': echo.astype(np.int8),
+        'long_name': 'Radar echo classification',
+        'standard_name': 'radar_echo_classification',
         '_FillValue': None,
-        'units': None,
-        'comment': ('-1 = Missing gate, 0 = cloud or precipitation, '
+        'units': 'unitless',
+        'comment': ('-1 = Missing gate, 0 = Cloud or precipitation, '
                     '1 = Ground clutter, 2 = Insects')
     }
-    radar.add_field('echo_classification', echo, replace_existing=True)
+    radar.add_field('radar_echo_classification', echo, replace_existing=True)
 
     return
+
+
+def _cond_prob(xi, pdf, bins, zero=1.0e-10):
+    """
+    Parse the conditional probability of the input data given its probability
+    density function.
+    """
+
+    # Compute the probability of xi occuring given the underlying probability
+    # density
+    P = pdf[np.abs(bins - xi).argmin()]
+
+    # Account for the zero frequency (probability) situation
+    if P < zero:
+        P = zero
+
+    return P
