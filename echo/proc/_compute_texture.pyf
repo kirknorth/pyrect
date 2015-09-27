@@ -3,7 +3,7 @@
 
 python module compute_texture ! in 
     interface  ! in :compute_texture
-        subroutine compute(input,sweep_start,sweep_end,ray_window,gate_window,fill_value,ns,nr,ng,sample,texture) ! in :compute_texture:src/compute_texture.f90
+        subroutine compute_f90(input,sweep_start,sweep_end,ray_window,gate_window,fill_value,ns,nr,ng,sample,texture) ! in :compute_texture:src/compute_texture.f90
             real(kind=8) dimension(nr,ng),intent(in) :: input
             integer(kind=4) dimension(ns),intent(in) :: sweep_start
             integer(kind=4) dimension(ns),intent(in),depend(ns) :: sweep_end
@@ -15,7 +15,7 @@ python module compute_texture ! in
             integer(kind=4), optional,intent(in),check(shape(input,1)==ng),depend(input) :: ng=shape(input,1)
             integer(kind=4) dimension(nr,ng),intent(out),depend(nr,ng) :: sample
             real(kind=8) dimension(nr,ng),intent(out),depend(nr,ng) :: texture
-        end subroutine compute
+        end subroutine compute_f90
     end interface 
 end python module compute_texture
 

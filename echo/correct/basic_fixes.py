@@ -108,11 +108,20 @@ def remove_salt(radar, fields=None, salt_window=(3, 3), salt_sample=5,
     return
 
 
-def interpolate_missing(
-        radar, fields=None, interp_window=(3, 3), interp_sample=8,
-        kind='mean', rays_wrap_around=False, fill_value=None, debug=False,
-        verbose=False):
+def fill_holes(
+        radar, fields=None, fill_window=(3, 3), fill_sample=8, kind='mean',
+        rays_wrap_around=False, fill_value=None, debug=False, verbose=False):
     """
+    Fill in (interpolate) missing radar gates assuming enough information is
+    available from surrounding gates. Ideally the window in which information
+    from surrounding gates is used should be small, e.g., using the 8
+    surrounding radar gates.
+
+    Parameters
+    ----------
+    radar : Radar
+        Py-ART Radar with fields to be filled.
+
     """
 
     # Parse fill value
@@ -124,10 +133,12 @@ def interpolate_missing(
         fields = radar.fields.keys()
 
     # Parse interpolation parameters
-    ray_window, gate_window = interp_window
+    ray_window, gate_window = fill_window
 
-    # Loop over all fields and interpolate missing gates
     for field in fields:
+
+        if field not in radar.fields:
+            continue
 
         if verbose:
             print 'Filling missing gates: {}'.format(field)
@@ -154,7 +165,7 @@ def interpolate_missing(
         if kind.upper() == 'MEAN':
             sweeps.mean_fill(
                 data, sweep_start, sweep_end, ray_window=ray_window,
-                gate_window=gate_window, min_sample=interp_sample,
+                gate_window=gate_window, min_sample=fill_sample,
                 rays_wrap=rays_wrap_around, fill_value=fill_value)
         else:
             raise ValueError('Unsupported interpolation method')
@@ -193,9 +204,10 @@ def _binary_dilation(radar, field, structure=None, iterations=1, debug=False,
     iterations : int, optional
         The number of iterations to repeat dilation. If iterations is less than
         1, the dilation is repeated until the result does not change anymore.
-    debug, verbose : bool, optional
-        True to print debugging and progress information, respectively, False
-        to suppress.
+    debug : bool, optional
+        True to print debugging information, False to suppress.
+    verbose : bool, optional
+        True to print progress information, False to suppress.
 
     """
 
@@ -231,7 +243,7 @@ def _binary_dilation(radar, field, structure=None, iterations=1, debug=False,
 
 
 def _binary_significant_features(
-        radar, binary_field, size_bins=75, size_limits=(0, 300),
+        radar, binary_field, size_bins=100, size_limits=(0, 400),
         structure=None, debug=False, verbose=False):
     """
     Objectively determine the minimum echo feature size (in radar gates) and
@@ -288,14 +300,16 @@ def _binary_significant_features(
         if debug:
             print 'Unique features in sweep {}: {}'.format(i, nlabels)
 
-        # Compute the size in radar gates of each labeled feature
-        sweep_sizes = ndimage.labeled_comprehension(
-            is_valid_gate, labels, index, np.count_nonzero, np.int32, 0)
-        feature_sizes.append(sweep_sizes)
+        if nlabels > 0:
 
-        # Set each labeled feature to its total size in radar gates
-        for label, size in zip(index, sweep_sizes):
-            size_data[sweep][labels == label] = size
+            # Compute the size in radar gates of each labeled feature
+            sweep_sizes = ndimage.labeled_comprehension(
+                is_valid_gate, labels, index, np.count_nonzero, np.int32, 0)
+            feature_sizes.append(sweep_sizes)
+
+            # Set each labeled feature to its total size in radar gates
+            for label, size in zip(index, sweep_sizes):
+                size_data[sweep][labels == label] = size
 
     feature_sizes = np.hstack(feature_sizes)
 

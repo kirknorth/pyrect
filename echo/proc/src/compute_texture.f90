@@ -1,8 +1,8 @@
 ! Module: texture.f90
 
 
-subroutine compute(input, sweep_start, sweep_end, ray_window, gate_window, &
-						 fill_value, ns, nr, ng, sample, texture)
+subroutine compute_f90(input, sweep_start, sweep_end, ray_window, &
+	                    gate_window, fill_value, ns, nr, ng, sample, texture)
 
 	implicit none
 
@@ -71,4 +71,4 @@ subroutine compute(input, sweep_start, sweep_end, ray_window, gate_window, &
 
 	return
 
-end subroutine compute
+end subroutine compute_f90

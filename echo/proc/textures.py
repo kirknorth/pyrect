@@ -1,6 +1,6 @@
 """
-echo.texture.texture_fields
-===========================
+echo.proc.textures
+==================
 
 """
 
@@ -9,6 +9,7 @@ import json
 import pickle
 import numpy as np
 
+from warnings import warn
 from collections import defaultdict
 
 from pyart.io import read
@@ -19,9 +20,9 @@ from . import compute_texture
 
 def add_textures(
         radar, fields=None, gatefilter=None, texture_window=(3, 3),
-        texture_sample=5, min_ncp=None, min_sweep=None, max_sweep=None,
+        texture_sample=5, min_sqi=None, min_sweep=None, max_sweep=None,
         min_range=None, max_range=None, rays_wrap_around=False,
-        fill_value=None, ncp_field=None, debug=False, verbose=False):
+        fill_value=None, sqi_field=None, debug=False, verbose=False):
     """
     """
 
@@ -30,14 +31,16 @@ def add_textures(
         fill_value = get_fillvalue()
 
     # Parse field names
-    if ncp_field is None:
-        ncp_field = get_field_name('normalized_coherent_power')
+    if sqi_field is None:
+        sqi_field = get_field_name('normalized_coherent_power')
 
     # Parse fields to compute textures
     # If no fields are specified then the texture field of all available radar
     # fields are computed
     if fields is None:
         fields = radar.fields.keys()
+    if isinstance(fields, str):
+        fields = [fields]
 
     # Parse texture window parameters
     ray_window, gate_window = texture_window
@@ -53,10 +56,10 @@ def add_textures(
         _compute_field(
             radar, field, gatefilter=gatefilter, ray_window=ray_window,
             gate_window=gate_window, min_sample=texture_sample,
-            min_ncp=min_ncp, min_sweep=min_sweep, max_sweep=max_sweep,
+            min_sqi=min_sqi, min_sweep=min_sweep, max_sweep=max_sweep,
             min_range=min_range, max_range=max_range,
             rays_wrap_around=rays_wrap_around, fill_value=fill_value,
-            text_field=None, ncp_field=ncp_field)
+            text_field=None, sqi_field=sqi_field, debug=debug, verbose=verbose)
 
     return
 
@@ -151,6 +154,7 @@ def histogram_from_json(
         'gate window size': gate_window,
         }
 
+
 def histograms_from_radar(
         radar, hist_dict, gatefilter=None, texture_window=(3, 3),
         texture_sample=5, min_ncp=None, min_sweep=None, max_sweep=None,
@@ -202,21 +206,39 @@ def histograms_from_radar(
 
     return
 
-
 def _compute_field(
         radar, field, gatefilter=None, ray_window=3, gate_window=3,
-        min_sample=5, min_ncp=None, min_sweep=None, max_sweep=None,
+        min_sample=5, min_sqi=None, min_sweep=None, max_sweep=None,
         min_range=None, max_range=None, rays_wrap_around=False,
-        fill_value=None, text_field=None, ncp_field=None):
+        fill_value=None, text_field=None, sqi_field=None, debug=False,
+        verbose=False):
     """
     Compute the texture (standard deviation) within the 2-D window for the
     specified field.
 
     Parameters
     ----------
-
-    Optional Parameters
-    ----------------
+    radar : Radar
+        Py-ART Radar containing input field to compute its texture field.
+    field : str
+        Input field to compute texture field.
+    gatefilter : GateFilter, optional
+        Py-ART GateFilter used to discriminate valid radar gates from invalid
+        ones.
+    ray_window : int, optional
+        Number of rays (azimuths) centered around main gate to compute texture.
+    gate_window : int, optional
+        Number of gates centered around main gate to compute texture.
+    min_sample : int, optional
+        Minimum sample size (in number of radar gates) within 2-D texture
+        window required to define valid texture computation. When None this is
+        equivalent to a minimum sample size of 1.
+    min_sqi : float, optional
+        Minimum signal quality index defining valid radar gates.
+    min_sweep : int, optional
+        Minimum sweep number where the texture field is computed.
+    max_sweep : int, optional
+        Maximum sweep number where the texture field is computed.
 
     """
 
@@ -225,21 +247,22 @@ def _compute_field(
         fill_value = get_fillvalue()
 
     # Parse field names
-    if ncp_field is None:
-        ncp_field = get_field_name('normalized_coherent_power')
+    if sqi_field is None:
+        sqi_field = get_field_name('normalized_coherent_power')
     if text_field is None:
         text_field = '{}_texture'.format(field)
 
     # Parse radar data
-    data = radar.fields[field]['data']
+    if field not in radar.fields:
+        warn('Field not available to compute texture', Warning)
+    data = radar.fields[field]['data'].copy()
 
     # Mask sweeps outside of specified range
-    if min_sweep is not None:
-        i = radar.sweep_start_ray_index['data'][min_sweep]
-        data[:i+1,:] = np.ma.masked
-    if max_sweep is not None:
-        i = radar.sweep_end_ray_index['data'][max_sweep]
-        data[i+1:,:] = np.ma.masked
+    for sweep, sweep_slice in enumerate(radar.iter_slice()):
+        if min_sweep is not None and sweep < min_sweep:
+            data[sweep_slice] = np.ma.masked
+        if max_sweep is not None and sweep > max_sweep:
+            data[sweep_slice] = np.ma.masked
 
     # Mask radar range gates outside specified range
     if min_range is not None:
@@ -249,14 +272,18 @@ def _compute_field(
         i = np.abs(radar.range['data'] / 1000.0 - max_range).argmin()
         data[:,i+1:] = np.ma.masked
 
-    # Mask incoherent echoes
-    if min_ncp is not None and ncp_field in radar.fields:
-        ncp = radar.fields[ncp_field]['data']
-        data = np.ma.masked_where(ncp < min_ncp, data)
+    # Signal quality check
+    if min_sqi is not None and sqi_field in radar.fields:
+        sqi = radar.fields[sqi_field]['data']
+        data = np.ma.masked_where(sqi < min_sqi, data)
 
-    # Mask excluded gates
+    # Parse gate filter
     if gatefilter is not None:
         data = np.ma.masked_where(gatefilter.gate_excluded, data)
+
+    if debug:
+        N = np.count_nonzero(~np.ma.getmaskarray(data))
+        print 'Sample size of data field: {}'.format(N)
 
     # Prepare data for ingest into Fortran wrapper
     data = np.ma.filled(data, fill_value)
@@ -269,7 +296,7 @@ def _compute_field(
     sweep_end = radar.sweep_end_ray_index['data'] + 1
 
     # Compute texture field
-    sample_size, texture = compute_texture.compute(
+    sample_size, texture = compute_texture.compute_f90(
         data, sweep_start, sweep_end, ray_window=ray_window,
         gate_window=gate_window, fill_value=fill_value)
 
@@ -284,20 +311,23 @@ def _compute_field(
     texture = np.ma.masked_invalid(texture, copy=False)
     texture.set_fill_value(fill_value)
 
+    if debug:
+        N = np.count_nonzero(~np.ma.getmaskarray(texture))
+        print 'Sample size of texture field: {}'.format(N)
+
     # Create texture field dictionary and add it to the radar object
-    texture = {
+    texture_dict = {
         'data': texture.astype(np.float32),
-        'long_name': '{} texture'.format(radar.fields[field]['long_name']),
         'standard_name': text_field,
         'valid_min': 0.0,
         '_FillValue': texture.fill_value,
         'units': radar.fields[field]['units'],
         'comment_1': ('Texture field is defined as the standard deviation '
-                      'within a prescribed 2D window'),
+                      'within a prescribed 2-D window'),
         'comment_2': '{} x {} window'.format(gate_window, ray_window),
     }
 
-    radar.add_field(text_field, texture, replace_existing=True)
+    radar.add_field(text_field, texture_dict, replace_existing=True)
 
     return
 

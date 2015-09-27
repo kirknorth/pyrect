@@ -13,18 +13,19 @@ from pyart.correct import GateFilter
 from pyart.config import get_fillvalue, get_field_name, get_metadata
 
 from . import sweeps, basic_fixes
-from ..texture import texture_fields
+from ..proc import textures
 
 
 def significant_detection(
-        radar, gatefilter=None, remove_small_features=True, size_bins=75,
-        size_limits=(0, 300), fill_holes=False, dilate=False, structure=None,
-        iterations=1, rays_wrap_around=False, min_ncp=None, ncp_field=None,
+        radar, gatefilter=None, remove_small_features=True, size_bins=100,
+        size_limits=(0, 400), fill_holes=False, dilate=False, structure=None,
+        iterations=1, rays_wrap_around=False, min_sqi=None, sqi_field=None,
         detect_field=None, debug=False, verbose=False):
     """
     Determine the significant detection of a radar. Note that significant
     detection can still include other non-meteorological echoes that the user
-    may still have to remove further down the processing chain.
+    may still have to remove further down the processing chain (e.g.,
+    biological echoes).
 
     Parameters
     ----------
@@ -34,7 +35,8 @@ def significant_detection(
         If None, all radar gates will initially be assumed valid.
     remove_small_features : bool, optional
         True to remove insignificant echo features (e.g., salt and pepper
-        noise) from significant detection mask.
+        noise) from significant detection mask, False to keep all sizes of
+        echo features.
     size_bins : int, optional
         Number of bins used to bin echo feature sizes and thus define its
         distribution.
@@ -57,12 +59,11 @@ def significant_detection(
     rays_wrap_around : bool, optional
         Whether the rays at the beginning and end of a sweep are connected
         (e.g., PPI VCP).
-    min_ncp : float, optional
-        Minimum normalized coherent power (signal quality) value used to
-        indicate a significant echo.
-    ncp_field : str, optional
-        Minimum normalized coherent power (signal quality) field name. The
-        default uses the Py-ART configuation file.
+    min_sqi : float, optional
+        Minimum signal quality value used to indicate a significant echo.
+    sqi_field : str, optional
+        Signal quality field name. The default uses the Py-ART configuation
+        file.
     detect_field : str, optional
         Radar significant detection mask field name.
     debug : bool, optional
@@ -73,13 +74,12 @@ def significant_detection(
     Returns
     -------
     gatefilter : GateFilter
-        Py-ART GateFilter object indicating which radar gates are valid and
-        invalid.
+        Py-ART GateFilter discriminating valid radar gates from invalid ones.
     """
 
     # Parse field names
-    if ncp_field is None:
-        ncp_field = get_field_name('normalized_coherent_power')
+    if sqi_field is None:
+        sqi_field = get_field_name('normalized_coherent_power')
     if detect_field is None:
         detect_field = 'significant_detection_mask'
 
@@ -87,9 +87,9 @@ def significant_detection(
     if gatefilter is None:
         gatefilter = GateFilter(radar, exclude_based=False)
 
-    # Exclude gates with poor signal quality
-    if min_ncp is not None and ncp_field in radar.fields:
-        gatefilter.include_above(ncp_field, min_ncp, op='and', inclusive=True)
+    # Include gates with good signal quality
+    if min_sqi is not None and sqi_field in radar.fields:
+        gatefilter.include_above(sqi_field, min_sqi, op='and', inclusive=True)
 
     detect_dict = {
         'data': gatefilter.gate_included.astype(np.int8),
@@ -97,7 +97,6 @@ def significant_detection(
         'standard_name': 'significant_detection_mask',
         'valid_min': 0,
         'valid_max': 1,
-        '_FillValue': None,
         'units': 'unitless',
         'comment': '0 = no significant detection, 1 = significant detection',
     }
@@ -125,9 +124,162 @@ def significant_detection(
     return gatefilter
 
 
+def significant_features(
+        radar, fields, gatefilter=None, size_bins=100, size_limits=(0, 400),
+        structure=None, save_size_field=False, fill_value=None, debug=False,
+        verbose=False):
+    """
+    Determine significant radar echo features on a sweep by sweep basis by
+    computing the size each echo feature. Here an echo feature is defined as
+    multiple connected radar gates with valid data, where the connection
+    structure is defined by the user.
+
+    Parameters
+    ----------
+    radar : Radar
+        Py-ART Radar containing
+    fields : str or list or tuple
+        Radar fields to be used to identify significant echo featues.
+    gatefilter : GateFilter
+        Py-ART GateFilter instance.
+    size_bins : int, optional
+        Number of size bins used to bin feature size distribution.
+    size_limits : list or tuple, optional
+        Lower and upper limits of the feature size distribution. This together
+        with size_bins defines the bin width of the feature size distribution.
+    structure : array_like, optional
+        Binary structuring element used to define connected radar gates. The
+        default defines a structuring element in which diagonal radar gates are
+        not considered connected.
+    save_size_field : bool, optional
+        True to save size fields in the radar object, False to discard.
+    debug : bool, optional
+        True to print debugging information, False to suppress.
+
+
+    Returns
+    -------
+    gf : GateFilter
+        Py-ART GateFilter.
+
+    """
+
+    # Parse fill value
+    if fill_value is None:
+        fill_value = get_fillvalue()
+
+    # Parse radar fields
+    if isinstance(fields, str):
+        fields = [fields]
+
+    # Parse gate filter
+    if gatefilter is None:
+        gf = GateFilter(radar, exclude_based=False)
+
+    # Parse binary structuring element
+    if structure is None:
+        structure = ndimage.generate_binary_structure(2, 1)
+
+    for field in fields:
+
+        if verbose:
+            print 'Processing echo features: {}'.format(field)
+
+        # Initialize echo feature size array
+        size_data = np.zeros_like(
+            radar.fields[field]['data'], subok=False, dtype=np.int32)
+
+        feature_sizes = []
+        for sweep, _slice in enumerate(radar.iter_slice()):
+
+            # Parse radar sweep data and define only valid gates
+            data = radar.get_field(sweep, field, copy=False)
+            is_valid_gate = ~np.ma.getmaskarray(data)
+
+            # Label the connected features in the radar sweep data and create
+            # index array which defines each unique label (feature)
+            labels, nlabels = ndimage.label(
+                is_valid_gate, structure=structure, output=None)
+            index = np.arange(1, nlabels + 1, 1)
+
+            if debug:
+                print 'Unique features in sweep {}: {}'.format(sweep, nlabels)
+
+            # Compute the size (in radar gates) of each echo feature
+            # Check for case where no echo features are found, e.g., no data in
+            # sweep
+            if nlabels > 0:
+                sweep_sizes = ndimage.labeled_comprehension(
+                    is_valid_gate, labels, index, np.count_nonzero,
+                    np.int32, 0)
+                feature_sizes.append(sweep_sizes)
+
+                # Set each label (feature) to its total size (in radar gates)
+                for label, size in zip(index, sweep_sizes):
+                    size_data[_slice][labels == label] = size
+
+        # Stack sweep echo feature sizes
+        feature_sizes = np.hstack(feature_sizes)
+
+        # Bin and compute feature size occurrences
+        counts, bin_edges = np.histogram(
+            feature_sizes, bins=size_bins, range=size_limits, normed=False,
+            weights=None, density=False)
+        bin_centers = bin_edges[:-1] + np.diff(bin_edges) / 2.0
+        bin_width = np.diff(bin_edges).mean()
+
+        if debug:
+            print 'Bin width: {} gate(s)'.format(bin_width)
+
+        # Compute the peak of the echo feature size distribution. We expect the
+        # peak of the echo feature size distribution to be close to 1 radar
+        # gate
+        peak_size = bin_centers[counts.argmax()] - bin_width / 2.0
+
+        if debug:
+            print 'Feature size at peak: {} gate(s)'.format(peak_size)
+
+        # Determine the first instance when the count (sample size) for an echo
+        # feature size bin reaches 0 after the distribution peak. This will
+        # define the minimum echo feature size
+        is_zero_size = np.logical_and(
+            bin_centers > peak_size, np.isclose(counts, 0, atol=1.0e-1))
+        min_size = bin_centers[is_zero_size].min() - bin_width / 2.0
+
+        if debug:
+            _range = [0.0, min_size]
+            print 'Insignificant feature size range: {} gates'.format(_range)
+
+        # Mask invalid feature sizes, e.g., zero-size features
+        size_data = np.ma.masked_equal(size_data, 0, copy=False)
+        size_data.set_fill_value(fill_value)
+
+        # Parse echo feature size field name
+        size_field = '{}_feature_size'.format(field)
+
+        # Add echo feature size field to radar
+        size_dict = {
+            'data': size_data.astype(np.int32),
+            'long_name': 'Echo feature size in number of radar gates',
+            '_FillValue': size_data.fill_value,
+            'units': 'unitless',
+            'comment': None,
+            }
+        radar.add_field(size_field, size_dict, replace_existing=True)
+
+        # Update gate filter
+        gf.include_above(size_field, min_size, op='and', inclusive=False)
+
+        # Remove eacho feature size field if specified
+        if not save_size_field:
+            radar.fields.pop(size_field, None)
+
+    return gf
+
+
 def hildebrand_noise(
         radar, gatefilter=None, scale=1.0, remove_small_features=False,
-        size_bins=75, size_limits=(0, 300), rays_wrap_around=False,
+        size_bins=100, size_limits=(0, 400), rays_wrap_around=False,
         fill_value=None, power_field=None, noise_field=None, mask_field=None,
         verbose=False):
     """
@@ -219,10 +371,11 @@ def hildebrand_noise(
 
 def echo_boundaries(
         radar, gatefilter=None, texture_window=(3, 3), texture_sample=5,
-        min_texture=None, bounds_percentile=95.0, remove_small_features=False,
-        size_bins=75, size_limits=(0, 300), rays_wrap_around=False,
-        fill_value=None, sqi_field=None, text_field=None, bounds_field=None,
-        debug=False, verbose=False):
+        min_texture=None, min_pct=95.0, min_sweep=None,
+        remove_small_features=False, size_bins=100, size_limits=(0, 400),
+        structure=None, rays_wrap_around=False, fill_value=None,
+        sqi_field=None, text_field=None, bounds_field=None, debug=False,
+        verbose=False):
     """
     Objectively determine the location of significant echo boundaries through
     analysis of signal quality index (SQI) texture. The a priori assumption is
@@ -259,18 +412,18 @@ def echo_boundaries(
 
     # Compute signal quality index texture field
     ray_window, gate_window = texture_window
-    texture_fields._compute_field(
+    textures._compute_field(
         radar, sqi_field, ray_window=ray_window, gate_window=gate_window,
-        min_sample=texture_sample, min_ncp=None, min_sweep=None,
+        min_sample=texture_sample, min_sqi=None, min_sweep=min_sweep,
         max_sweep=None, rays_wrap_around=rays_wrap_around,
-        fill_value=fill_value, text_field=text_field, ncp_field=None)
+        fill_value=fill_value, text_field=text_field, sqi_field=None)
 
     if min_texture is None:
 
         # The specified boundary percentile defines the minimum SQI texture
         # value for significant echo boundaries
         min_texture = np.percentile(
-            radar.fields[text_field]['data'].compressed(), bounds_percentile,
+            radar.fields[text_field]['data'].compressed(), min_pct,
             overwrite_input=False, interpolation='linear')
 
         if debug:
@@ -279,19 +432,24 @@ def echo_boundaries(
             print 'Echo boundary SQI texture range: {}'.format(_range)
 
         # Compute percentiles for debugging purposes
-        percentiles = [5, 10, 25, 50, 75, 90, 95, 99, 100]
-        textures = np.percentile(
-            radar.fields[text_field]['data'].compressed(), percentiles,
+        pcts = [5, 10, 25, 50, 75, 90, 95, 99, 100]
+        sqi_textures = np.percentile(
+            radar.fields[text_field]['data'].compressed(), pcts,
             overwrite_input=False, interpolation='linear')
 
         if debug:
-            for p, texture in zip(percentiles, textures):
+            for p, texture in zip(pcts, sqi_textures):
                 print '{}% SQI texture = {:.5f}'.format(p, texture)
 
     # Determine radar gates which meet minimum normalized coherent power
     # texture
     is_boundary = radar.fields[text_field]['data'] >= min_texture
     is_boundary = np.ma.filled(is_boundary, False)
+
+    # Conditional sampling checks
+    for sweep, sweep_slice in enumerate(radar.iter_slice()):
+        if sweep < min_sweep:
+            is_boundary[sweep_slice] = False
 
     # Create significant echo boundaries field dictionary
     bounds_dict = {
@@ -322,11 +480,25 @@ def echo_boundaries(
 
 def velocity_coherency(
         radar, gatefilter=None, text_bins=40, text_limits=(0, 20),
-        nyquist=None, texture_window=(3, 3), texture_sample=5,
-        max_texture=None, rays_wrap_around=False, remove_small_features=False,
-        size_bins=75, size_limits=(0, 300), fill_value=None, vdop_field=None,
-        text_field=None, coherent_field=None, debug=False, verbose=False):
+        nyquist_vel=None, texture_window=(3, 3), texture_sample=5,
+        max_texture=None, min_sweep=None, rays_wrap_around=False,
+        remove_small_features=False, size_bins=100, size_limits=(0, 400),
+        fill_value=None, vdop_field=None, text_field=None, coherent_field=None,
+        debug=False, verbose=False):
     """
+
+    Parameters
+    ----------
+    radar : Radar
+        Py-ART Radar containing Doppler velocity data.
+    gatefilter : GateFilter, optional
+        Py-ART GateFilter instance. If None, all radar gates will initially be
+        assumed valid.
+
+    Returns
+    -------
+    gf : GateFilter
+        Py-ART GateFilter.
     """
 
     # Parse fill value
@@ -345,7 +517,7 @@ def velocity_coherency(
         print 'Computing Doppler velocity coherency mask'
 
     # Parse Nyquist velocity
-    if nyquist is None:
+    if nyquist_vel is None:
         nyquist = radar.get_nyquist_vel(0, check_uniform=True)
 
     if debug:
@@ -353,10 +525,10 @@ def velocity_coherency(
 
     # Compute Doppler velocity texture field
     ray_window, gate_window = texture_window
-    texture_fields._compute_field(
+    textures._compute_field(
         radar, vdop_field, ray_window=ray_window, gate_window=gate_window,
-        min_sample=texture_sample, min_ncp=None, min_sweep=None,
-        max_sweep=None, fill_value=fill_value, ncp_field=None,
+        min_sample=texture_sample, min_sqi=None, min_sweep=min_sweep,
+        max_sweep=None, fill_value=fill_value, sqi_field=None,
         text_field=text_field)
 
     # Automatically determine the maximum Doppler velocity texture value which
@@ -393,14 +565,13 @@ def velocity_coherency(
                 noise_peak_theory)
 
         # Find the closest Doppler velocity texture distribution peak to the
-        # computed theoretical location
-        # Here we assume that the Doppler velocity texture distribution
-        # has at least one primary mode which correspondes to the incoherent
-        # (noisy) part of the Doppler velocity texture distribution
-        # Depending on the radar volume and the bin width used to define the
-        # distribution, the distribution may be bimodal, with the new peak
-        # corresponding to the coherent part of the Doppler velocity texture
-        # distribution
+        # computed theoretical location. Here we assume that the Doppler
+        # velocity texture distribution has at least one primary mode which
+        # corresponds to the incoherent (noisy) part of the Doppler velocity
+        # texture distribution. Depending on the radar volume and the bin width
+        # used to define the distribution, the distribution may be bimodal,
+        # with the additional peak corresponding to the coherent part of the
+        # Doppler velocity texture distribution
         idx = np.abs(bin_centers[kmax] - noise_peak_theory).argmin()
         noise_peak = bin_centers[kmax][idx]
 
@@ -425,7 +596,7 @@ def velocity_coherency(
         # exist such that the first minimum to the left of the noise peak is
         # not the appropriate minimum and the left edge detection breaks down
         is_left_side = bin_centers[kmin] < noise_peak
-        max_texture = bin_centers[kmin][is_left_side].max() + bin_width / 2.0
+        max_texture = bin_centers[kmin][is_left_side].min() + bin_width / 2.0
 
         if debug:
             _range = [0.0, round(max_texture, 3)]
@@ -436,6 +607,11 @@ def velocity_coherency(
             radar.fields[text_field]['data'] >= 0.0,
             radar.fields[text_field]['data'] <= max_texture)
     is_coherent = np.ma.filled(is_coherent, False)
+
+    # Conditional sampling checks
+    for sweep, sweep_slice in enumerate(radar.iter_slice()):
+        if sweep < min_sweep:
+            is_coherent[sweep_slice] = False
 
     coherent_dict = {
         'data': is_coherent.astype(np.int8),
@@ -468,11 +644,11 @@ def velocity_coherency(
 
 def velocity_phasor_coherency(
         radar, gatefilter=None, text_bins=40, text_limits=(0, 20),
-        nyquist=None, texture_window=(3, 3), texture_sample=5,
-        max_texture=None, rays_wrap_around=False, remove_small_features=False,
-        size_bins=75, size_limits=(0, 300), fill_value=None, vdop_field=None,
-        phasor_field=None, text_field=None, coherent_field=None, debug=False,
-        verbose=False):
+        nyquist_vel=None, texture_window=(3, 3), texture_sample=5,
+        max_texture=None, min_sweep=None, rays_wrap_around=False,
+        remove_small_features=False, size_bins=100, size_limits=(0, 400),
+        fill_value=None, vdop_field=None, phasor_field=None, text_field=None,
+        coherent_field=None, debug=False, verbose=False):
     """
     """
 
@@ -494,7 +670,7 @@ def velocity_phasor_coherency(
         print 'Computing Doppler velocity phasor coherency mask'
 
     # Parse Nyquist velocity
-    if nyquist is None:
+    if nyquist_vel is None:
         nyquist = radar.get_nyquist_vel(0, check_uniform=True)
 
     if debug:
@@ -525,10 +701,10 @@ def velocity_phasor_coherency(
 
     # Compute Doppler velocity phasor texture field
     ray_window, gate_window = texture_window
-    texture_fields._compute_field(
+    textures._compute_field(
         radar, phasor_field, ray_window=ray_window, gate_window=gate_window,
-        min_sample=texture_sample, min_ncp=None, min_sweep=None,
-        max_sweep=None, fill_value=fill_value, ncp_field=None)
+        min_sample=texture_sample, min_sqi=None, min_sweep=min_sweep,
+        max_sweep=None, fill_value=fill_value, sqi_field=None)
 
     # Automatically bracket coherent part of Doppler velocity phasor texture
     # distribution
@@ -605,6 +781,11 @@ def velocity_phasor_coherency(
         radar.fields[text_field]['data'] <= max_texture)
     is_coherent = np.ma.filled(is_coherent, False)
 
+    # Conditional sampling checks
+    for sweep, sweep_slice in enumerate(radar.iter_slice()):
+        if sweep < min_sweep:
+            is_coherent[sweep_slice] = False
+
     # Create Doppler velocity phasor coherency mask dictionary
     coherent_dict = {
         'data': is_coherent.astype(np.int8),
@@ -658,10 +839,10 @@ def _spectrum_width_coherency(
 
     # Compute spectrum width texture field
     ray_window, gate_window = texture_window
-    texture_fields._compute_field(
+    textures._compute_field(
         radar, width_field, ray_window=ray_window, gate_window=gate_window,
-        min_sample=texture_sample, min_ncp=None, min_sweep=None,
-        max_sweep=None, fill_value=fill_value, ncp_field=None)
+        min_sample=texture_sample, min_sqi=None, min_sweep=None,
+        max_sweep=None, fill_value=fill_value, sqi_field=None)
 
     # Automatically bracket noise distribution
     if min_sigma is None and max_sigma is None:
@@ -776,117 +957,5 @@ def _spectrum_width_coherency(
 
     # Update gate filter
     gatefilter.include_equal(cohere_field, 1, op='and')
-
-    return gatefilter
-
-
-def _significant_features(
-        radar, field, gatefilter=None, min_size=None, size_bins=75,
-        size_limits=(0, 300), structure=None, remove_size_field=True,
-        fill_value=None, size_field=None, debug=False, verbose=False):
-    """
-    """
-
-    # Parse fill value
-    if fill_value is None:
-        fill_value = get_fillvalue()
-
-    # Parse field names
-    if size_field is None:
-        size_field = '{}_feature_size'.format(field)
-
-    # Parse gate filter
-    if gatefilter is None:
-        gatefilter = GateFilter(radar, exclude_based=False)
-
-    # Parse binary structuring element
-    if structure is None:
-        structure = ndimage.generate_binary_structure(2, 1)
-
-    # Initialize echo feature size array
-    size_data = np.zeros_like(
-        radar.fields[field]['data'], subok=False, dtype=np.int32)
-
-    # Loop over all sweeps
-    feature_sizes = []
-    for sweep in radar.iter_slice():
-
-        # Parse radar sweep data and define only valid gates
-        is_valid_gate = ~radar.fields[field]['data'][sweep].mask
-
-        # Label the connected features in radar sweep data and create index
-        # array which defines each unique label (feature)
-        labels, nlabels = ndimage.label(
-            is_valid_gate, structure=structure, output=None)
-        index = np.arange(1, nlabels + 1, 1)
-
-        if debug:
-            print 'Number of unique features for {}: {}'.format(sweep, nlabels)
-
-        # Compute the size (in radar gates) of each echo feature
-        # Check for case where no echo features are found, e.g., no data in
-        # sweep
-        if nlabels > 0:
-            sweep_sizes = ndimage.labeled_comprehension(
-                is_valid_gate, labels, index, np.count_nonzero, np.int32, 0)
-            feature_sizes.append(sweep_sizes)
-
-            # Set each label (feature) to its total size (in radar gates)
-            for label, size in zip(index, sweep_sizes):
-                size_data[sweep][labels == label] = size
-
-    # Stack sweep echo feature sizes
-    feature_sizes = np.hstack(feature_sizes)
-
-    # Compute histogram of echo feature sizes, bin centers and bin
-    # width
-    counts, bin_edges = np.histogram(
-        feature_sizes, bins=size_bins, range=size_limits, normed=False,
-        weights=None, density=False)
-    bin_centers = bin_edges[:-1] + np.diff(bin_edges) / 2.0
-    bin_width = np.diff(bin_edges).mean()
-
-    if debug:
-        print 'Bin width: {} gate(s)'.format(bin_width)
-
-    # Compute the peak of the echo feature size distribution
-    # We expect the peak of the echo feature size distribution to be close to 1
-    # radar gate
-    peak_size = bin_centers[counts.argmax()] - bin_width / 2.0
-
-    if debug:
-        print 'Feature size at peak: {} gate(s)'.format(peak_size)
-
-    # Determine the first instance when the count (sample size) for an echo
-    # feature size bin reaches 0 after the distribution peak
-    # This will define the minimum echo feature size
-    is_zero_size = np.logical_and(
-        bin_centers > peak_size, np.isclose(counts, 0, atol=1.0e-5))
-    min_size = bin_centers[is_zero_size].min() - bin_width / 2.0
-
-    if debug:
-        _range = [0.0, min_size]
-        print 'Insignificant feature size range: {} gates'.format(_range)
-
-    # Mask invalid feature sizes, e.g., zero-size features
-    size_data = np.ma.masked_equal(size_data, 0, copy=False)
-    size_data.set_fill_value(fill_value)
-
-    # Add echo feature size field to radar
-    size_dict = {
-        'data': size_data.astype(np.int32),
-        'standard_name': size_field,
-        'long_name': '',
-        '_FillValue': size_data.fill_value,
-        'units': 'unitless',
-    }
-    radar.add_field(size_field, size_dict, replace_existing=True)
-
-    # Update gate filter
-    gatefilter.include_above(size_field, min_size, op='and', inclusive=False)
-
-    # Remove eacho feature size field
-    if remove_size_field:
-        radar.fields.pop(size_field, None)
 
     return gatefilter

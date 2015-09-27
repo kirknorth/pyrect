@@ -1,4 +1,4 @@
 """
 """
 
-from . import texture_fields
+from .textures import add_textures
