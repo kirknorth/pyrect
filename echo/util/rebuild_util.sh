@@ -1,5 +1,5 @@
 # Remove and rebuild _texture_fields.so
 
-rm -f compute_texture.so
-f2py -m compute_texture -h _compute_texture.pyf src/compute_texture.f90 --overwrite-signature
-f2py --fcompiler=gfortran -c _compute_texture.pyf src/compute_texture.f90 
+rm -f util_brute.so
+f2py -m util_brute -h _util_brute.pyf src/util_brute.f90 --overwrite-signature
+f2py --fcompiler=gfortran -c _util_brute.pyf src/util_brute.f90 
