@@ -1,0 +1,26 @@
+!    -*- f90 -*-
+! Note: the context of this file is case sensitive.
+
+python module _texture ! in 
+    interface  ! in :_texture
+        subroutine compute_texture(field,sweep_start,sweep_end,ray_window,gate_window,rays_wrap_around,fill_value,debug,verbose,nr,ng,ns,sigma,sample_size) ! in :_texture:texture.f90
+            real(kind=8) dimension(nr,ng),intent(in) :: field
+            integer(kind=4) dimension(ns),intent(in) :: sweep_start
+            integer(kind=4) dimension(ns),intent(in),depend(ns) :: sweep_end
+            integer(kind=4) intent(in) :: ray_window
+            integer(kind=4) intent(in) :: gate_window
+            logical intent(in) :: rays_wrap_around
+            real(kind=8) intent(in) :: fill_value
+            logical intent(in) :: debug
+            logical intent(in) :: verbose
+            integer(kind=4), optional,intent(in),check(shape(field,0)==nr),depend(field) :: nr=shape(field,0)
+            integer(kind=4), optional,intent(in),check(shape(field,1)==ng),depend(field) :: ng=shape(field,1)
+            integer(kind=4), optional,intent(in),check(len(sweep_start)>=ns),depend(sweep_start) :: ns=len(sweep_start)
+            real(kind=8) dimension(nr,ng),intent(out),depend(nr,ng) :: sigma
+            integer(kind=4) dimension(nr,ng),intent(out),depend(nr,ng) :: sample_size
+        end subroutine compute_texture
+    end interface 
+end python module _texture
+
+! This file was auto-generated with f2py (version:2).
+! See http://cens.ioc.ee/projects/f2py2e/

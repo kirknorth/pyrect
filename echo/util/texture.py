@@ -3,16 +3,17 @@ echo.util.texture
 =================
 
 A submodule for computing texture fields from radar fields. A texture field is
-defined as the standard deviation of a radar measurement within a prescribed
-1-D or 2-D window.
+defined as the standard deviation of a radar measurement within a 1-D or 2-D
+window centered around a radar gate.
 
 """
 
+import time
 import numpy as np
 
 from pyart.config import get_fillvalue, get_field_name
 
-from . import util_brute
+from ._texture import compute_texture
 
 
 def add_textures(
@@ -20,7 +21,7 @@ def add_textures(
         min_sweep=None, max_sweep=None, min_range=None, max_range=None,
         rays_wrap_around=False, fill_value=None, debug=False, verbose=False):
     """
-    Add texture fields to radar fields dictionary.
+    Add texture fields to radar.
 
     Parameters
     ----------
@@ -82,7 +83,7 @@ def add_textures(
 
         _add_texture(
             radar, field, gatefilter=gatefilter, ray_window=ray_window,
-            gate_window=gate_window, min_sample=texture_sample,
+            gate_window=gate_window, min_sample=min_sample,
             min_sweep=min_sweep, max_sweep=max_sweep, min_range=min_range,
             max_range=max_range, rays_wrap_around=rays_wrap_around,
             fill_value=fill_value, debug=debug, verbose=verbose)
@@ -130,8 +131,7 @@ def _add_texture(
     debug : bool, optional
         True to print debugging information, False to suppress.
     verbose : bool, optional
-        True to print progress and identification information, False to
-        suppress.
+        True to print relevant information, False to suppress.
 
     """
 
@@ -155,10 +155,10 @@ def _add_texture(
 
     # Mask radar range gates outside specified gate range
     if min_range is not None:
-        idx = np.abs(radar.range['data'] / 1000.0 - min_range).argmin()
+        idx = np.abs(radar.range['data'] - min_range).argmin()
         data[:,:idx+1] = np.ma.masked
     if max_range is not None:
-        idx = np.abs(radar.range['data'] / 1000.0 - max_range).argmin()
+        idx = np.abs(radar.range['data'] - max_range).argmin()
         data[:,idx+1:] = np.ma.masked
 
     # Parse gate filter information
@@ -166,43 +166,43 @@ def _add_texture(
         data = np.ma.masked_where(gatefilter.gate_excluded, data)
 
     if debug:
-        N = np.count_nonzero(~np.ma.getmaskarray(data))
+        N = np.ma.count(data)
         print 'Sample size of data field: {}'.format(N)
 
-    # Prepare data for ingest into Fortran wrapper
-    data = np.ma.filled(data, fill_value)
-    data = np.asfortranarray(data, dtype=np.float64)
-
     # Parse sweep start and end indices
-    # Offset indices by 1 in order to be compatible with Fortran and avoid a
-    # segmentation fault
-    sweep_start = radar.sweep_start_ray_index['data'] + 1
-    sweep_end = radar.sweep_end_ray_index['data'] + 1
+    sweep_start = radar.sweep_start_ray_index['data']
+    sweep_end = radar.sweep_end_ray_index['data']
+
+    # Record starting time
+    start = time.time()
 
     # Compute texture field
-    texture, sample_size = util_brute.compute_texture(
-        data, sweep_start, sweep_end, ray_window=ray_window,
-        gate_window=gate_window, fill_value=fill_value)
+    sigma, sample_size = compute_texture(
+        np.ma.filled(data, fill_value), sweep_start, sweep_end, ray_window,
+        gate_window, rays_wrap_around, fill_value, debug, verbose)
 
-    # Do not include gates where sample size is insufficient
+    # Record elapsed time to compute texture
+    elapsed = time.time() - start
+    if debug:
+        print('Elapsed time to compute texture: {:.2f} sec'.format(elapsed))
+
     if min_sample is not None:
-        texture = np.ma.masked_where(sample_size < min_sample, texture)
-
-    # Mask invalid values
-    texture = np.ma.masked_values(texture, fill_value, atol=1.0e-5)
-    texture = np.ma.masked_invalid(texture)
-    texture.set_fill_value(fill_value)
+        sigma = np.ma.masked_where(sample_size < min_sample, sigma)
+    sigma = np.ma.masked_invalid(sigma)
+    sigma = np.ma.masked_values(sigma, fill_value, atol=1.0e-5)
 
     if debug:
-        N = np.count_nonzero(~np.ma.getmaskarray(texture))
+        N = np.ma.count(sigma)
         print 'Sample size of texture field: {}'.format(N)
 
-    radar.add_field_like(field, text_field, texture, replace_existing=True)
+    sigma_dict = {
+        'data': sigma,
+        'units': '',
+        'valid_min': 0.0,
+        'number_of_rays': ray_window,
+        'number_of_gates': gate_window,
+        }
 
-    # Add field metadata
-    radar.fields[text_field]['long_name'] = 'Texture field'
-    radar.fields[text_field]['valid_min'] = 0.0
-    radar.fields[text_field]['window'] = '{} (ray) x {} (gate)'.format(
-        ray_window, gate_window)
+    radar.add_field(text_field, sigma_dict, replace_existing=True)
 
     return
