@@ -178,8 +178,10 @@ def _add_texture(
 
     # Compute texture field
     sigma, sample_size = compute_texture(
-        np.ma.filled(data, fill_value), sweep_start, sweep_end, ray_window,
-        gate_window, rays_wrap_around, fill_value, debug, verbose)
+        np.ma.filled(data, fill_value), sweep_start, sweep_end,
+        ray_window=ray_window, gate_window=gate_window,
+        rays_wrap_around=rays_wrap_around, fill_value=fill_value,
+        debug=debug, verbose=verbose)
 
     # Record elapsed time to compute texture
     elapsed = time.time() - start

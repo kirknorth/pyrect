@@ -37,6 +37,10 @@ subroutine compute_texture(field, sweep_start, sweep_end, ray_window, &
 !		radar volumes.
 !	fill_value : float64
 !		Value indicating missing or bad data in field.
+!	debug : logical
+!		True to print debugging information, False to suppress.
+!	verbose : logical
+!		True to print relevant information, False to suppress.
 !
 !	Returns
 !	-------

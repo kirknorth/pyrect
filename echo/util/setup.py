@@ -1,21 +1,30 @@
 """
 """
 
-from os.path import join
+import os
+import sys
+
+from numpy import get_include
 from numpy.distutils.misc_util import Configuration
+from numpy.distutils.core import setup
+
 
 def configuration(parent_package='', top_path=None):
     """
     """
-    config = Configuration('texture', parent_package, top_path)
 
-    # Add texture fields extension
-    source = ['_compute_texture.pyf', 'src/compute_texture.f90']
+    config = Configuration('util', parent_package, top_path)
+
+    # Add extension for _texture submodule (Cython)
     config.add_extension(
-        'compute_texture', sources=source, f2py_options=[])
+        '_texture', sources='_texture.c', include_dirs=get_include())
+
+    # Add extension for _texture submodule (Fortran)
+    config.add_extension(
+        '_texture', sources=['_texture.pyf', '_texture.f90'], f2py_options=None,
+        include_dirs=get_include())
 
     return config
 
 if __name__ == '__main__':
-    from numpy.distutils.core import setup
     setup(**configuration(top_path='').todict())
