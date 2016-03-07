@@ -1,0 +1,19 @@
+!    -*- f90 -*-
+! Note: the context of this file is case sensitive.
+
+python module _noise ! in 
+    interface  ! in :_noise
+        subroutine hildebrand(power,fill_value,nr,ng,p,q,r2) ! in :_noise:_noise.f90
+            real(kind=8) dimension(nr,ng),intent(in) :: power
+            real(kind=8) intent(in) :: fill_value
+            integer(kind=4), optional,intent(in),check(shape(power,0)==nr),depend(power) :: nr=shape(power,0)
+            integer(kind=4), optional,intent(in),check(shape(power,1)==ng),depend(power) :: ng=shape(power,1)
+            real(kind=8) dimension(ng),intent(out),depend(ng) :: p
+            real(kind=8) dimension(ng),intent(out),depend(ng) :: q
+            real(kind=8) dimension(ng),intent(out),depend(ng) :: r2
+        end subroutine hildebrand
+    end interface 
+end python module _noise
+
+! This file was auto-generated with f2py (version:2).
+! See http://cens.ioc.ee/projects/f2py2e/
