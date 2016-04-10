@@ -1,119 +1,98 @@
 """
-echo.util._texture
-==================
+pyrect.util._texture
+====================
 
 Cython routines for computing texture fields. A texture field is defined as the
 standard deviation of a radar measurement within a 1-D or 2-D window centered
 around a radar gate.
 
+.. autosummary::
+    :toctree: generated/
+
+    add_texture
+
 """
 
-import time
 import numpy as np
 
 cimport numpy as np
 cimport cython
 
-from cpython cimport bool
+from pyart.config import get_metadata, get_fillvalue
 
 # Necessary and/or potential future improvements to _texture submodule:
 #
 # * Properly handle contiguous sweep volumes, e.g., 360 deg PPI volumes.
 
-@cython.boundscheck(False)
 
-def compute_texture(np.ndarray[np.float32_t, ndim=2] field,
-                    np.ndarray[np.int32_t, ndim=1] sweep_start,
-                    np.ndarray[np.int32_t, ndim=1] sweep_end,
-                    np.int32_t ray_window, np.int32_t gate_window,
-                    bool rays_wrap_around, np.float32_t fill_value,
-                    bool debug, bool verbose):
+@cython.boundscheck(False)
+@cython.wraparound(False)
+def add_texture(radar, field, size=(3, 3), rays_wrap_around=False, debug=False,
+                verbose=False):
     """
 
     Parameters
     ----------
-    field : ndarray
+    radar : Radar
+        Radar containing specified field.
+    field : str
+        Radar field.
+    size : int or sequence of ints, optional
+        The sizes of the texture filter are given for each axis as a sequence,
+        or as a single number, in which case the size is equal for all axes.
+        The default filter is 3 rays and 3 gates in size.
 
-    sweep_start : ndarray
-
-    sweep_end : ndarray
-
-    fill_value : float
-        Value indicating missing or bad data in field.
-    debug : bool
+    Optional parameters
+    -------------------
+    rays_wrap_around : bool, optional
+        True if rays are contiguous in all sweeps.
+    debug : bool, optional
         True to print debugging information, False to suppress.
-    verbose : bool
+    verbose : bool, optional
         True to print relevant information, False to suppress.
-
-    Returns
-    -------
-    sigma : ndarray
-        Texture field computed from input radar field.
-    sample_size : ndarray
-        Number of available radar measurements within texture window to compute
-        texture field.
 
     """
 
-    cdef np.int32_t nrays = field.shape[0]
-    cdef np.int32_t ngates = field.shape[1]
-    cdef np.int32_t nsweeps = sweep_start.shape[0]
+    cdef int sweep, ray, gate
 
-    cdef np.ndarray[np.float32_t, ndim=2] sigma
-    cdef np.ndarray[np.int32_t, ndim=2] sample_size
-    cdef np.ndarray[np.int32_t, ndim=2] valid_gate
+    cdef float [:, ::1] sigma = np.empty_like(radar.fields[field]['data'])
+    cdef int [:, ::1] sample
+    cdef int [:, ::1] mask
 
-    cdef np.int32_t sweep, ray, gate, ray_start, ray_end, sample
-    cdef np.int32_t r0, rf, g0, gf
+    collect = _IndexCollector(radar, rays_wrap_around=rays_wrap_around)
 
-    # Initialize arrays
-    sigma = np.full_like(field, np.nan, dtype=np.float32)
-    sample_size = np.zeros_like(field, dtype=np.int32)
-    valid_gate = np.zeros_like(field, dtype=np.int32)
+    for ray in range(collect.nrays):
+        for gate in range(collect.ngates):
+            sigma[ray, gate] = 0.0
 
-    #
-    field[np.isclose(field, fill_value, atol=1.0e-5)] = np.nan
-    valid_gate[np.isfinite(field)] = 1
+    return
 
-    if debug:
-        print('Ray window half length: {}'.format(ray_window // 2))
-        print('Gate window half length: {}'.format(gate_window // 2))
 
-    for sweep in range(nsweeps):
 
-        # Parse the sweep start and end indices
-        ray_start = sweep_start[sweep]
-        ray_end = sweep_end[sweep]
+cdef class _IndexCollector:
+    """
+    """
 
-        for ray in range(ray_start, ray_end + 1):
+    cdef int nrays, ngates, nsweeps
+    cdef int [:] sweep_start, sweep_end
 
-            r0 = ray - ray_window // 2
-            rf = ray + ray_window // 2
+    def __init__(self, radar, size=(3, 3), rays_wrap_around=False):
+        """ Initialize. """
 
-            # Check for condition where current ray is close to a sweep
-            # boundary
-            if r0 < ray_start or rf > ray_end:
+        # Default parameters
+        self.size = size
+        self.rays_wrap_around = rays_wrap_around
 
-                if rays_wrap_around:
-                    raise ValueError
-                else:
-                    if r0 < ray_start:
-                        r0 = ray_start
-                    if rf > ray_end:
-                        rf = ray_end
+        self.nrays = radar.nrays
+        self.ngates = radar.ngates
+        self.nsweeps = radar.nsweeps
+        self.sweep_start = radar.sweep_start_ray_index['data']
+        self.sweep_end = radar.sweep_end_ray_index['data']
 
-            for gate in range(ngates):
+    def add_neighbors(self):
+        """
+        """
+        return
 
-                # Gates along a ray are by definition not contiguous so no
-                # wrapping conditions have to be checked for
-                g0 = max(0, gate - gate_window // 2)
-                gf = min(ngates - 1, gate + gate_window // 2)
 
-                # Compute sample size within texture window
-                sample = np.sum(valid_gate[r0:rf+1,g0:gf+1])
-                sample_size[ray,gate] = sample
 
-                if sample > 1 and valid_gate[ray,gate]:
-                    sigma[ray,gate] = np.nanstd(field[r0:rf+1,g0:gf+1], ddof=1)
-
-    return sigma, sample_size

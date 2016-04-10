@@ -3,7 +3,6 @@
 
 import os
 import sys
-
 from numpy import get_include
 from numpy.distutils.misc_util import Configuration
 from numpy.distutils.core import setup
@@ -21,8 +20,8 @@ def configuration(parent_package='', top_path=None):
 
     # Add extension for _texture submodule (Fortran)
     config.add_extension(
-        '_texture', sources=['_texture.pyf', '_texture.f90'], f2py_options=None,
-        include_dirs=get_include())
+        '_texture', sources=['_texture.pyf', '_texture.f90'],
+        f2py_options=None, include_dirs=get_include())
 
     return config
 

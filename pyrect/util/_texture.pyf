@@ -3,20 +3,20 @@
 
 python module _texture ! in 
     interface  ! in :_texture
-        subroutine compute_texture(field,sweep_start,sweep_end,ray_window,gate_window,rays_wrap_around,fill_value,debug,verbose,nr,ng,ns,sigma,sample_size) ! in :_texture:_texture.f90
-            real(kind=8) dimension(nr,ng),intent(in) :: field
+        subroutine compute_texture(data,sweep_start,sweep_end,ray_size,gate_size,rays_wrap_around,fill_value,debug,verbose,nr,ng,ns,std,sample_size) ! in :_texture:_texture.f90
+            real(kind=8) dimension(nr,ng),intent(in) :: data
             integer(kind=4) dimension(ns),intent(in) :: sweep_start
             integer(kind=4) dimension(ns),intent(in),depend(ns) :: sweep_end
-            integer(kind=4) intent(in) :: ray_window
-            integer(kind=4) intent(in) :: gate_window
+            integer(kind=4) intent(in) :: ray_size
+            integer(kind=4) intent(in) :: gate_size
             logical intent(in) :: rays_wrap_around
             real(kind=8) intent(in) :: fill_value
             logical intent(in) :: debug
             logical intent(in) :: verbose
-            integer(kind=4), optional,intent(in),check(shape(field,0)==nr),depend(field) :: nr=shape(field,0)
-            integer(kind=4), optional,intent(in),check(shape(field,1)==ng),depend(field) :: ng=shape(field,1)
+            integer(kind=4), optional,intent(in),check(shape(data,0)==nr),depend(data) :: nr=shape(data,0)
+            integer(kind=4), optional,intent(in),check(shape(data,1)==ng),depend(data) :: ng=shape(data,1)
             integer(kind=4), optional,intent(in),check(len(sweep_start)>=ns),depend(sweep_start) :: ns=len(sweep_start)
-            real(kind=8) dimension(nr,ng),intent(out),depend(nr,ng) :: sigma
+            real(kind=8) dimension(nr,ng),intent(out),depend(nr,ng) :: std
             integer(kind=4) dimension(nr,ng),intent(out),depend(nr,ng) :: sample_size
         end subroutine compute_texture
     end interface 
