@@ -58,7 +58,7 @@ def add_textures(radar, fields=None, gatefilter=None, size=(3, 3),
             print 'Computing texture field: {}'.format(field)
 
         _compute_texture(
-            radar, field, gatefilter=gatefilter, size=size
+            radar, field, gatefilter=gatefilter, size=size,
             rays_wrap_around=rays_wrap_around, debug=debug, verbose=verbose)
 
     return
@@ -97,7 +97,7 @@ def _compute_texture(radar, field, gatefilter=None, size=(3, 3),
     """
 
     # parse image data
-    image = radar.fields[field]['data'].copy()
+    image = radar.fields[field]['data']
 
     # Parse gate filter
     if gatefilter is not None:
@@ -114,7 +114,7 @@ def _compute_texture(radar, field, gatefilter=None, size=(3, 3),
         mode = 'reflect'
 
     x = np.empty_like(image)  # store mean of image
-    y = np.empyt_like(image)  # store mean of image squared
+    y = np.empty_like(image)  # store mean of image squared
     for slc in radar.iter_slice():
         ndimage.uniform_filter(
             image[slc], size=size, output=x[slc], mode=mode, origin=0)
