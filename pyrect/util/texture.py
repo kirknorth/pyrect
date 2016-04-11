@@ -99,7 +99,7 @@ def _compute_texture(radar, field, gatefilter=None, size=(3, 3),
     # parse image data
     image = radar.fields[field]['data']
 
-    # Parse gate filter
+    # parse gate filter
     if gatefilter is not None:
         image = np.ma.masked_where(gatefilter.gate_excluded, image)
 

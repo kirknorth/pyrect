@@ -29,12 +29,11 @@ def test_texture_all_excluded():
     return
 
 
-def _make_constant_refl_radar():
-    """
-    """
+def _make_constant_refl_radar(fill=5.0):
+    """ Create radar with constant reflectivity. """
 
     radar = sample_objects.make_empty_ppi_radar(101, 360, 1)
     refl_dict = get_metadata('reflectivity')
-    refl_dict['data'] = np.ones((radar.nrays, radar.ngates))
+    refl_dict['data'] = np.full((radar.nrays, radar.ngates), fill)
     radar.add_field(get_field_name('reflectivity'), refl_dict)
     return radar

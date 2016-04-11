@@ -1,10 +1,11 @@
 """
+Py-RECT: Python Radar Echo Classification Toolkit
+=================================================
+
 """
 
-from . import texture
-from . import moment
-from . import location
-from . import frequency
-from . import membership
+# import subpackages
+from . import core
+from . import util
+from . import member
 from . import correct
-from . import graph
